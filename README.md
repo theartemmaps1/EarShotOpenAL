@@ -44,6 +44,8 @@ So adding new weapon shoot sounds is pretty much the same as you'd do it in prev
 (for example, AK-47), you'd create a new file with extension ".earshot" and with name of the weapon from weapon.dat (ak47.earshot).
 Place "shoot.wav" (weapon shooting sound) inside it.
 
+Tip: To avoid creating too many folders, you can place multiple ".earshot" files inside the same folder as the sound you want to use for multiple weapons.
+
 NOTE!!! If you want alternative sounds to have some variety, simply add a number to the end of the filename. (for example, "shoot0.wav", "shoot1.wav", "filename0.wav", "filename1.wav" etc.).
 You can add up to 10 alternatives (300 for ambience), to any file like that.
 
@@ -87,6 +89,12 @@ Place them at GameFolder\EarShot\generic\bullet_whizz
 Left sounds is when the bullet is on the left side of the camera, second (right) is when on the right side of the camera.
 Rear is when the bullet comes from behind you, and vice versa.
 Sounds gotta be stereo, because it plays on front-end, and has no position in 3D space.
+
+# 1.5. Dry-fire & low ammo cues:
+
+If you want dry-fire or low-ammo cues (similar to CS:GO), place a dryfire.wav file for dry-fire and a low_ammo.wav file for low-ammo cues.
+Low-ammo cues trigger when ammo falls below 33% of total capacity.
+Dry-fire triggers when the clip reaches 0.
 
 # 2. Explosion sounds
 
