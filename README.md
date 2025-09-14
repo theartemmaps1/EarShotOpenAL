@@ -7,7 +7,7 @@ Fork of the original mod by HzanRsxa2959, which aims to improve &amp; fix the or
 Hi there! I really suggest you to read it all, so you'd fully understand how to add new sounds to your SA build! ( If didn't, not my problem :) )
 
 
-About:
+# About:
 This is a revamp of a abandoned mod "EarShot" that allowed you to add NEW weapon sounds WITHOUT replacement of vanilla sounds.
 This idea came from my friend, when he experienced problems with this mod and missing things, such as after shot echo (or after shot sound), doppler, reverb, etc.
 So he told me if i could do something about it, and that's where things began to escalate...
@@ -21,6 +21,7 @@ All audio files need to be exactly a .wav extension.
 The mod has a couple of debug menu entries, such as logging toggle, and reloading all audio folders (may cause unusual behavior, but none was detected during testing).
 
 Credits go to the original EarShot author (HzanRsxa2959) for the original mod.
+
 Special thanks to:
 Shimada - testing.
 Mentraze - VC weapon pack & testing.
@@ -38,10 +39,12 @@ A: Double check paths, file names, also peep logs for some info, and more import
 (mod won't even inject if it's missing), and also check if you have "ModelExtras" mod on, because it disables this mod and replaces with it's own implementation.
 Nag Grinch to remove that :D.
 
-1. Weapon sounds:
+# 1. Weapon sounds:
 So adding new weapon shoot sounds is pretty much the same as you'd do it in previous version of EarShot. You'd create folder inside "EarShot" folder with any name
 (for example, AK-47), you'd create a new file with extension ".earshot" and with name of the weapon from weapon.dat (ak47.earshot).
 Place "shoot.wav" (weapon shooting sound) inside it.
+
+Tip: To avoid creating too many folders, you can place multiple ".earshot" files inside the same folder as the sound you want to use for multiple weapons.
 
 NOTE!!! If you want alternative sounds to have some variety, simply add a number to the end of the filename. (for example, "shoot0.wav", "shoot1.wav", "filename0.wav", "filename1.wav" etc.).
 You can add up to 10 alternatives (300 for ambience), to any file like that.
@@ -60,20 +63,20 @@ TIP: i recommend checking the "EarShotOpenAL.log" logfile for more useful info.
 
 For a distant shot add a file named "distant.wav", and it'll play it when you're far away enough from the shooter (50 units).
 
-1.1. Minigun special:
+# 1.1. Minigun special:
 If you're replacing minigun sounds, the barrel spinning sounds for it is "spin.wav" (main spinning loop), and "spin_end.wav" (when done spinning).
 If you're replacing spinning sounds, make sure to replace all of them, not just one.
 Possible output: GameFolder\EarShot\Minigun\spin.wav (for barrel spin loop).
 Possible output: GameFolder\EarShot\Minigun\spin_end.wav (for barrel spin end).
 
-1.2. Missiles:
+# 1.2. Missiles:
 If you wish to have custom sounds for missiles, simply create a "Missiles" folder inside "EarShot" folder and place a "missile_flyloop.wav" file there. 
 Possible output: GameFolder\EarShot\Missiles\missile_flyloop.wav (LS gunfire for pistol).
 
-1.3. Rhino cannon:
+# 1.3. Rhino cannon:
 If you wish to have Rhino have a cannon shooting sound, you can create a folder with "Tank Cannon" (strictly with this name) name in "EarShot" folder, and put the "cannon_fire.wav" file inside!
 
-1.4. Bullet whizzing:
+# 1.4. Bullet whizzing:
 
 If you want to replace default bullet whizzing sounds, do this:
 
@@ -87,7 +90,13 @@ Left sounds is when the bullet is on the left side of the camera, second (right)
 Rear is when the bullet comes from behind you, and vice versa.
 Sounds gotta be stereo, because it plays on front-end, and has no position in 3D space.
 
-2. Explosion sounds
+# 1.5. Dry-fire & low ammo cues:
+
+If you want dry-fire or low-ammo cues (similar to CS:GO), place a dryfire.wav file for dry-fire and a low_ammo.wav file for low-ammo cues.
+Low-ammo cues trigger when ammo falls below 33% of total capacity.
+Dry-fire triggers when the clip reaches 0.
+
+# 2. Explosion sounds
 
 Here's my personal favourite, we all love some explosion, right? And we want proper sounds for it without vanilla replacement. So follow these steps for max immersion!
 They are replaced in GameFolder\EarShot\generic\explosions folder.
@@ -101,7 +110,7 @@ Explosion types: https://wiki.multitheftauto.com/wiki/Explosion_types
 Possible output for generic explosions: GameFolder\EarShot\generic\explosions\explosion.wav
 Possible output for explosion types: GameFolder\EarShot\generic\explosions\explosionTypes\4\explosion.wav, debris.wav, etc. (4 is the car explosion type).
 
-3. Footsteps
+# 3. Footsteps
 
 If you feel like your footstep sounds are boring, you can replace them here too!
 They can be replaced at GameFolder\EarShot\generic\footsteps.
@@ -115,7 +124,7 @@ Possible output: GameFolder\EarShot\generic\footsteps\pavement\step.wav (generic
 For shoe types: GameFolder\EarShot\generic\footsteps\sneaker\pavement\step.wav (A different sound type for sneakers on the pavement).
 
 
-4. Ricochet sounds
+# 4. Ricochet sounds
 
 You can also replace gun ricochect (or impact sounds) here.
 You can find them at GameFolder\EarShot\generic\ricochet.
@@ -124,7 +133,7 @@ Same as footsteps, create a folder and add a audiofile named "ricochet.wav".
 
 Possible output:  GameFolder\EarShot\generic\ricochet\wood\step.wav (generic sound for wooden surface).
 
-5. Fire sounds
+# 5. Fire sounds
 
 Replacing fire sounds is easy, they can be found at GameFolder\EarShot\generic\fire.
 Game has multiple fire types so we name each file by the fire type we want to replace.
@@ -134,7 +143,7 @@ Game has multiple fire types so we name each file by the fire type we want to re
 
 Possible output: GameFolder\EarShot\generic\fire\fire_carloop.wav (sound for car engine flame).
 
-6. Melee sounds
+# 6. Melee sounds
 
 You can also replace fists/melee related sounds here as well, just like in previous EarShot.
 Fists supported as well.
@@ -150,7 +159,7 @@ Pistol whipping sound replacement is quite simple too. You place the "hit.wav" s
 
 Possible output: GameFolder\EarShot\Pistol\hit.wav (Whipping sfx).
 
-6.1. Jacking sounds:
+# 6.1. Jacking sounds:
 This subsection is for jacking sounds related to car jacking.
 
 Before proceeding please make sure that your sounds have correct hitting time according to the anim, and body-drop sound!
@@ -166,7 +175,7 @@ Specify the sounds at GameFolder\EarShot\generic\jacked.
 
 Possible output: GameFolder\EarShot\generic\jacked\jack_car.wav (generic sound for carjacking).
 
-7. Ambience sounds.
+# 7. Ambience sounds.
 
 Here comes the most interesting part, for me personally, is the ambience sounds around the map!
 Their main folder is at GameFolder\EarShot\generic\ambience.
@@ -212,3 +221,5 @@ Global zone: GameFolder\EarShot\generic\ambience\zones\ls\ambience.wav (daytime 
 For developers:
 
 This mod provides a export func named "GetContext", because if two plugins use OpenAL Soft at the same time, it can conflict, so use this func to get the context from this mod.
+
+Have fun!
