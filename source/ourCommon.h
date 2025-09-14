@@ -57,6 +57,8 @@ struct SoundInstance
 	bool isFire = false;
 	FxSystem_c* fireFX = nullptr;
 	CFire* firePtr = nullptr;
+
+	~SoundInstance() = default;
 };
 
 // Main array to manage ALL currently playing sounds
@@ -297,8 +299,8 @@ static auto playBuffer = [&](ALuint buff/*const std::vector<ALuint>* buffersInVe
 	bool isMinigunBarrelSpin = false, CPed* shooter = nullptr, eWeaponType weapType = eWeaponType(0), bool isGunfire = false,
 	bool isInteriorAmbience = false, bool isMissile = false, bool looping = false, uint32_t delay = 0, bool isAmbience = false, FxSystem_c* fireFX = nullptr) -> bool
 	{
-		float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
-		float audiovolume = gain * fader;
+		//float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+		//float audiovolume = gain * fader;
 		// No point in continuing, there's no valid buffers!
 		if (!alIsBuffer(buff)) return false;
 
@@ -309,14 +311,14 @@ static auto playBuffer = [&](ALuint buff/*const std::vector<ALuint>* buffersInVe
 		{
 			return false;
 		}
-		bool useLooping = false;
+		ALboolean useLooping = AL_FALSE;
 		if (isFire || isMissile || looping) 
 		{
-			useLooping = true;
+			useLooping = AL_TRUE;
 		}
 		alSourcei(inst->source, AL_BUFFER, buff);
 		alSource3f(inst->source, AL_POSITION, pos.x, pos.y, pos.z);
-		alSourcef(inst->source, AL_GAIN, audiovolume);
+		alSourcef(inst->source, AL_GAIN, gain);
 		alSourcef(inst->source, AL_AIR_ABSORPTION_FACTOR, airAbsorption);
 		alSourcef(inst->source, AL_PITCH, pitch);
 		alSourcei(inst->source, AL_LOOPING, useLooping);
@@ -371,10 +373,7 @@ static auto playBuffer = [&](ALuint buff/*const std::vector<ALuint>* buffersInVe
 		inst->isGunfireAmbience = isGunfire;
 		inst->isInteriorAmbience = isInteriorAmbience;
 		inst->bIsMissile = isMissile;
-		inst->baseGain = audiovolume;
-		inst->isFire = isFire;
-		inst->fireFX = fireFX;
-		inst->firePtr = firePtr;
+		inst->baseGain = gain;
 
 		if (inst->bIsMissile) 
 		{
@@ -390,11 +389,20 @@ static auto playBuffer = [&](ALuint buff/*const std::vector<ALuint>* buffersInVe
 			*outInst = inst;
 		}
 		if (isFire) {
+			inst->isFire = isFire;
+			inst->fireFX = fireFX;
+			inst->entity = nullptr;
+			inst->shooter = nullptr;
 			if (firePtr) {
+				inst->firePtr = firePtr;
 				g_Buffers.fireSounds[firePtr] = inst;
 			}
 		}
 		else if (fireEventID != 0) {
+			inst->isFire = false;
+			inst->firePtr = nullptr;
+			inst->entity = nullptr;
+			inst->shooter = nullptr;
 			g_Buffers.nonFireSounds[fireEventID] = inst;
 		}
 		if (inst) 
@@ -741,7 +749,7 @@ public:
 	// Get next unique number
 	int next() {
 		if (current >= indices.size()) {
-			// auto-reset if exhausted (optional behavior)
+			// auto-reset if exhausted
 			reset(indices.size());
 		}
 		return indices[current++];

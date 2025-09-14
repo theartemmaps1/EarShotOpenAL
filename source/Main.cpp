@@ -463,8 +463,13 @@ static void AudioPlay(fs::path* audiopath, CPhysical* audioentity, bool looped =
 		}
 	}*/
 	// for vehicle guns we make the sound a bit louder by changing it's distance attenuation
+	float rawGain = inst->baseGain;
+	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+
+	float gain = gameVol * fader;
 	playBuffer(buffer, veh ? 125.0f : 100.0f,
-		AEAudioHardware.m_fEffectMasterScalingFactor, veh ? 1.5f : 2.5f,
+		gain, veh ? 1.5f : 2.5f,
 		veh ? 1.5f : 3.0f, veh ? 0.5f : 1.0f,
 		pitch, pos, false, nullptr, 0, &inst, audioentity,
 		true, audiopath, audiopath->stem().string(), false,
@@ -1349,7 +1354,9 @@ void PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapontype, bool spinn
 				false, nullptr, "", true, entity, weaponType, false, false, false, true))
 			{
 				barrelSpinSource = instance->source;
+				Log("Playing spin = true");
 			}
+			Log("Playing spin = false");
 			barrelSpinVolume = 0.0f;
 		}
 
@@ -1371,7 +1378,7 @@ void PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapontype, bool spinn
 		}
 
 		// Once volume is faded out, stop source and play SPINEND
-		if (barrelSpinVolume < 0.1f && barrelSpinSource != 0) {
+		if (barrelSpinVolume <= 0.1f && barrelSpinSource != 0) {
 			if (playSpinEndSFX) {
 				if (AUDIOCALL(AUDIOSPINEND)) {
 					alSourceStop(barrelSpinSource);
@@ -1849,7 +1856,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 
 	auto findExistingAudioForFire = [&](CFire* fire) -> std::shared_ptr<SoundInstance> {
 		for (auto& a : audiosplaying) {
-			if (!a) continue;
+			if (!a || a->entity || a->shooter) continue;
 			if (a->firePtr == fire) {
 				return a;
 			}
@@ -1905,7 +1912,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		};
 
 	auto PlayFireLoopSound = [&](CFire* fire, const std::vector<ALuint>& bufferList) -> bool {
-		if (!fire->m_nFlags.bActive || CTimer::ms_fTimeScale <= 0.0f || bufferList.empty()) return false;
+		if (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise || CTimer::ms_fTimeScale <= 0.0f || bufferList.empty()) return false;
 
 		auto it = g_Buffers.fireSounds.find(fire);
 		CVector pos = fire->m_vecPosition;
@@ -1913,14 +1920,10 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		// If there is a mapping, use it, but treat AL_PAUSED specially
 		if (it != g_Buffers.fireSounds.end()) {
 			auto inst = it->second.get();
-			if (inst && inst->source != 0) {
+			if (inst && inst->isFire && inst->source != 0) {
 				alSource3f(inst->source, AL_POSITION, pos.x, pos.y, pos.z);
 				ALint state;
 				alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
-
-				// Update gain bookkeeping
-				alSourcef(inst->source, AL_GAIN, AEAudioHardware.m_fEffectMasterScalingFactor * fire->m_fStrength);
-				inst->baseGain = AEAudioHardware.m_fEffectMasterScalingFactor;
 
 				if (state == AL_PAUSED) {
 					if (inst->paused) {
@@ -1941,33 +1944,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 				// if state == AL_PLAYING -> nothing to do
 				return true;
 			}
-			// if mapped instance is null or invalid, fall through and attempt to reuse from audiosplaying
-		}
-
-		// Defensive: maybe the map was cleared but an instance still exists in audiosplaying.
-		// Find and re-use it to avoid creating duplicate sources for the same fire.
-		{
-			auto existing = findExistingAudioForFire(fire);
-			if (existing) {
-				// re-insert into map and update params, then behave like mapped case above
-				g_Buffers.fireSounds[fire] = existing;
-				if (existing->source != 0) {
-					alSource3f(existing->source, AL_POSITION, pos.x, pos.y, pos.z);
-					alSourcef(existing->source, AL_GAIN, AEAudioHardware.m_fEffectMasterScalingFactor);
-					existing->baseGain = AEAudioHardware.m_fEffectMasterScalingFactor;
-					ALint state;
-					alGetSourcei(existing->source, AL_SOURCE_STATE, &state);
-					if (state == AL_PAUSED) {
-						if (existing->paused) ResumeAudio(&*existing);
-						else { alSourcePlay(existing->source); existing->paused = false; }
-					}
-					else if (state == AL_STOPPED) {
-						alSourcePlay(existing->source);
-						existing->paused = false;
-					}
-					return true;
-				}
-			}
+			return false;
 		}
 
 		// create a new looping fire sound
@@ -1976,9 +1953,8 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		ALuint buffer = bufferList[idx];
 		if (buffer == 0) return false;
 
-		// Note: playBuffer will create the SoundInstance and populate g_Buffers.fireSounds[fire]
 		if (playBuffer(buffer, 200.0f, AEAudioHardware.m_fEffectMasterScalingFactor /* fire->m_fStrength*/, 4.0f,
-			1.0f, 1.5f, pitch, pos, true, fire))
+			1.0f, 1.5f, pitch, pos, true, fire, 0, nullptr, nullptr, false, nullptr, "", false, nullptr))
 		{
 			return true;
 		}
@@ -1998,7 +1974,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 
 	for (int i = 0; i < MAX_NUM_FIRES; i++) {
 		CFire* fire = &gFireManager.m_aFires[i];
-		if (!fire->m_nFlags.bActive || CTimer::ms_fTimeScale <= 0.0f) continue;
+		if (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise || CTimer::ms_fTimeScale <= 0.0f) continue;
 
 		switch (eventId) {
 		case AE_FIRE:
@@ -2058,17 +2034,17 @@ void UpdateFireSoundCleanup() {
 				alGetSourcei(sound->source, AL_SOURCE_STATE, &state);
 				if (state == AL_STOPPED && !sound->paused) {
 					alDeleteSources(1, &sound->source);
+					sound->source = 0;
+					sound->~SoundInstance();
 				}
 			}
 			it = g_Buffers.fireSounds.erase(it);
 			continue;
 		}
 
-		if (sound) {
+		if (sound && (!sound->entity && !sound->shooter)) {
 			CVector pos = fire->m_vecPosition;
 			alSource3f(sound->source, AL_POSITION, pos.x, pos.y, pos.z);
-			alSourcef(sound->source, AL_GAIN, sound->baseGain * fire->m_fStrength /*CalculateVolume(pos) */);
-			//sound->baseGain = AEAudioHardware.m_fEffectMasterScalingFactor * fire->m_fStrength;
 			ALint state;
 			alGetSourcei(sound->source, AL_SOURCE_STATE, &state);
 			if (state == AL_STOPPED && !sound->paused) {
@@ -2076,9 +2052,14 @@ void UpdateFireSoundCleanup() {
 
 				auto sfx = std::make_shared<SoundInstance>();
 				sfx->source = sound->source;
-				sfx->pos = pos;
-				sfx->baseGain = AEAudioHardware.m_fEffectMasterScalingFactor * fire->m_fStrength;
 				sfx->entity = nullptr;
+				sfx->isFire = true;
+				sfx->firePtr = fire;
+				sfx->isAmbience = false;
+				sfx->isGunfireAmbience = false;
+				sfx->isInteriorAmbience = false;
+				sfx->shooter = nullptr;
+				sfx->pos = pos;
 				bool already = false;
 				for (auto& a : audiosplaying) if (a->source == sound->source) { already = true; break; }
 				if (!already) audiosplaying.push_back(std::move(sfx));
@@ -2091,16 +2072,21 @@ void UpdateFireSoundCleanup() {
 
 	// Play and update volume of non-fire sounds
 	for (auto& [eventId, sound] : g_Buffers.nonFireSounds) {
-		if (!sound) continue;
+		if (!sound || sound->entity || sound->shooter) continue;
 
 		ALint state;
 		alGetSourcei(sound->source, AL_SOURCE_STATE, &state);
 		if (state == AL_STOPPED && !sound->paused) {
 			alSourcePlay(sound->source);
-			alSourcef(sound->source, AL_GAIN, sound->baseGain /*CalculateVolume(sound->pos, 10.0f, 6.0f)*/);
 
 			auto sfx = std::make_shared<SoundInstance>();
 			sfx->source = sound->source;
+			sfx->entity = nullptr;
+			sfx->isFire = false;
+			sfx->firePtr = nullptr;
+			sfx->isAmbience = false;
+			sfx->isGunfireAmbience = false;
+			sfx->isInteriorAmbience = false;
 			bool already = false;
 			for (auto& a : audiosplaying) if (a->source == sound->source) { already = true; break; }
 			if (!already) audiosplaying.push_back(std::move(sfx));
@@ -3436,6 +3422,7 @@ void ReloadAudioFolders()
 bool __cdecl TriggerTankFireHooked(CEntity* victim, CEntity* creator, eExplosionType type, CVector pos, uint32_t lifetime, uint8_t usesSound, float cameraShake, uint8_t bInvisible)
 {
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+	Log("CExplosion::AddExplosion: added explosion with type %d", type);
 	// We'll reuse this later for explosion-type specific explosion sounds
 	g_lastExplosionType[creator] = (int)type;
 	if (CPad::GetPad(0)->CarGunJustDown()) {
@@ -3800,9 +3787,11 @@ public:
 								alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
 								if (state == AL_PLAYING)
 								{
+									float rawGain = inst->baseGain;
 									float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
 									float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
-									float gain = (gameVol <= 0.0f) ? 0.0f : inst->baseGain * fader;
+
+									float gain = gameVol * fader;
 									alSourcef(inst->source, AL_GAIN, gain);
 								}
 								// Doppler effect (never for ambience sounds tho)
@@ -3893,7 +3882,9 @@ public:
 							}*/
 
 							// Update missile sound position and velocity
-							if (inst->entity && inst->missileSource != 0 && inst->source == inst->missileSource) {
+							if (!inst->isFire && state == AL_PLAYING) 
+							{
+							if (inst->entity && IsEntityPointerValid(inst->entity) && inst->missileSource != 0 && inst->source == inst->missileSource) {
 								alSource3f(inst->missileSource, AL_POSITION,
 									inst->entity->GetPosition().x,
 									inst->entity->GetPosition().y,
@@ -3910,8 +3901,8 @@ public:
 								alSource3f(inst->missileSource, AL_DIRECTION, direction.x, direction.y, direction.z);
 
 							}
-							if (!inst->isFire && state == AL_PLAYING) {
-								if (inst->entity) {
+							
+								if (inst->entity && IsEntityPointerValid(inst->entity)) {
 									alSource3f(inst->source, AL_POSITION,
 										inst->entity->GetPosition().x,
 										inst->entity->GetPosition().y,
@@ -3923,7 +3914,7 @@ public:
 									CVector direction = inst->entity->GetForward();
 									alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
 								}
-								else if (inst->shooter)
+								else if (inst->shooter && IsEntityPointerValid(inst->shooter))
 								{
 									alSource3f(inst->source, AL_POSITION,
 										inst->shooter->GetPosition().x,
@@ -3937,10 +3928,12 @@ public:
 									alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
 								}
 							}
-
 							if (inst->shooter && inst->minigunBarrelSpin && inst->source != 0)
 							{
 								alSource3f(inst->source, AL_POSITION, inst->shooter->GetPosition().x, inst->shooter->GetPosition().y, inst->shooter->GetPosition().z);
+							}
+							if (inst->isFire && inst->entity) {
+								Log("WARN: fire instance has non-null entity %p (name=%s, source=%u)", inst->entity, inst->nameBuffer.c_str(), inst->source);
 							}
 
 							// To prevent overflow, we erase any sources that are no longer used
@@ -3948,6 +3941,7 @@ public:
 								//	Log("Removed source '%d'", inst->source);
 								alDeleteSources(1, &inst->source);
 								inst->source = 0;
+								inst->~SoundInstance();
 								//	alDeleteFilters(1, &inst->filter);
 									//delete inst;
 								return true;
@@ -4056,7 +4050,8 @@ public:
 
 		ClearForRestartEvent += []()
 			{
-				//	ReloadAudioFolders();
+				// On restart, reload sound folders too
+				//ReloadAudioFolders();
 
 				// Reset ambience stuff on reload to prevent "never playing" issues
 				nextInteriorAmbienceTime = 0;
