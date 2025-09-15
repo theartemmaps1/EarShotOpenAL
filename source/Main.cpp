@@ -415,7 +415,7 @@ static void AudioPlay(fs::path* audiopath, CPhysical* audioentity, bool looped =
 	}
 
 	CPed* ped = (CPed*)audioentity;
-	std::shared_ptr<SoundInstance> inst;
+	auto inst = std::make_shared<SoundInstance>();
 	// Sound occlusion attempt
 	/*if (inst->isPossibleGunFire) {
 		static ALuint muffledFilter = 0;
@@ -463,7 +463,6 @@ static void AudioPlay(fs::path* audiopath, CPhysical* audioentity, bool looped =
 		}
 	}*/
 	// for vehicle guns we make the sound a bit louder by changing it's distance attenuation
-	float rawGain = inst->baseGain;
 	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
 	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
 
@@ -1311,42 +1310,37 @@ auto subhookCAudioEngine__ReportFrontEndAudioEvent = subhook_t();
     ((entity->m_nType == eEntityType::ENTITY_TYPE_PED && AUDIOMACRO(MODELUNDEFINED)) || AUDIOMACRO(entity->m_nModelIndex))
 const float barrelFadeDuration = 0.5f;
 
-static bool barrelSpinLoaded = false;
 static ALuint barrelSpinBuffer = 0;
 static ALuint barrelSpinSource = 0;
 static float barrelSpinVolume = 0.0f;
+void LoadMinigunBarrelSpinSound(const fs::path& folder)
+{
+	auto weapontype = eWeaponType();
 
+	for (auto& directoryentry : fs::recursive_directory_iterator(folder)) {
+		const auto& entrypath = directoryentry.path();
+		if (!fs::is_directory(entrypath)) {
+			std::string filename = entrypath.stem().string();
+			if (nameType(&filename, &weapontype)) {
+				fs::path spinPath = entrypath.parent_path() / "spin.wav";
+				if (fs::exists(spinPath)) {
+					barrelSpinBuffer = createOpenALBufferFromWAV(spinPath.string().c_str());
+					break;
+				}
+			}
+		}
+	}
+}
 void PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapontype, bool spinning, bool playSpinEndSFX = false) {
 	//if (!shooter || !ent) return;
 
 	//CPed* ped = reinterpret_cast<CPed*>(shooter);
 	CPlayerPed* playa = reinterpret_cast<CPlayerPed*>(entity);
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
-	if (!barrelSpinLoaded) {
-		auto weapontype = eWeaponType();
-
-		for (auto& directoryentry : fs::recursive_directory_iterator(foldermod)) {
-			const auto& entrypath = directoryentry.path();
-			if (!fs::is_directory(entrypath)) {
-				std::string filename = entrypath.stem().string();
-				if (nameType(&filename, &weapontype)) {
-					fs::path spinPath = entrypath.parent_path() / "spin.wav";
-					if (fs::exists(spinPath)) {
-						barrelSpinBuffer = createOpenALBufferFromWAV(spinPath.string().c_str());
-						barrelSpinLoaded = (barrelSpinBuffer != 0);
-						break;
-					}
-				}
-			}
-		}
-		if (!barrelSpinLoaded) return;
-	}
-
-
 	float deltaTime = CTimer::ms_fTimeStep;
 	//	CPed* entity = ped;
 	auto weaponType = entity->m_aWeapons[entity->m_nSelectedWepSlot].m_eWeaponType;
-	std::shared_ptr<SoundInstance> instance;
+	auto instance = std::make_shared<SoundInstance>();
 	if (spinning) {
 		// Start playing if not already
 		if (barrelSpinSource == 0) {
@@ -3358,6 +3352,17 @@ void LoadBulletWhizzSounds(const fs::path& folder) {
 }
 void ReloadAudioFolders()
 {
+	// Reload .ini as well
+	CIniReader ini(PLUGIN_PATH("EarShot.ini"));
+	Logging = ini.ReadBoolean("MAIN", "Logging", false);
+	maxBytesInLog = (uint64_t)ini.ReadInteger("MAIN", "Max bytes in log", 9000000);
+
+	interiorIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Interior interval min", 5000);
+	interiorIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Interior interval max", 10000);
+	fireIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Ambience interval min", 5000);
+	fireIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Ambience interval max", 10000);
+	zoneIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Zone ambience interval min", 5000);
+	zoneIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Zone ambience interval max", 10000);
 	// Stop and delete all currently playing sound sources
 	for (auto& inst : audiosplaying)
 	{
@@ -3418,6 +3423,7 @@ void ReloadAudioFolders()
 	LoadTankCannonSounds(foldermod);
 	LoadMissileSounds(foldermod);
 	LoadBulletWhizzSounds(foldermod);
+	LoadMinigunBarrelSpinSound(foldermod);
 	LoadMainWeaponsFolder();
 }
 // tank cannon fire sound (the explosion func hook)
@@ -3579,6 +3585,7 @@ public:
 			LoadTankCannonSounds(foldermod);
 			LoadMissileSounds(foldermod);
 			LoadBulletWhizzSounds(foldermod);
+			LoadMinigunBarrelSpinSound(foldermod);
 			};
 		patch::RedirectCall(0x504D11, PlayMinigunBarrelStopSound);
 		patch::RedirectCall(0x504CD2, PlayMinigunBarrelStopSound);
