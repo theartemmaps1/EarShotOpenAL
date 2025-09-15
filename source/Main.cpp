@@ -1645,7 +1645,9 @@ auto __fastcall HookedCAudioEngine__ReportBulletHit(CAudioEngine* engine, int, C
 		}
 
 		if (!surfaceResolved) {
-			if (IsAudioMetal(surface)) {
+			// If it's a metal surface OR it's a vehicle and a gravel surface, choose metal surface anyway
+			// Because vehicles can have gravel surfaces on them for some reason
+			if (IsAudioMetal(surface) || (victim && victim->m_nType == ENTITY_TYPE_VEHICLE && surface == SURFACE_GRAVEL)) {
 				surfaceType = "metal"; surfaceResolved = true;
 			}
 			else if (IsAudioWater(surface) || IsWater(surface) || IsShallowWater(surface)) {
