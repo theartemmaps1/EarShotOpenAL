@@ -28,7 +28,7 @@ Special thanks to:
 Shimada — testing.
 Mentraze — VC weapon pack & testing.
 Lividkilla66 — Driv3r footsteps pack & testing.
-Dun — Manhunt weapon pack & testing.
+Dun & CrimsonW — Manhunt weapon pack & testing.
 Matt1010 & Mentraze - for the logo.
 Get the latest OpenAL version here: https://github.com/kcat/openal-soft
 
