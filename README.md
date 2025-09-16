@@ -1,4 +1,4 @@
-                             ![logo](https://github-production-user-asset-6210df.s3.amazonaws.com/142259068/490128758-99c7859f-e15f-41ea-b71b-109bcf231d67.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20250916%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250916T153346Z&X-Amz-Expires=300&X-Amz-Signature=b6aebe01e0952deba2fb42aa00be24768288b6958c91bdbec272151ca57f807e&X-Amz-SignedHeaders=host
+                             ![logo](https://github-production-user-asset-6210df.s3.amazonaws.com/142259068/490128758-99c7859f-e15f-41ea-b71b-109bcf231d67.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20250916%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20250916T153346Z&X-Amz-Expires=300&X-Amz-Signature=b6aebe01e0952deba2fb42aa00be24768288b6958c91bdbec272151ca57f807e&X-Amz-SignedHeaders=host)
 
 # EarShotOpenAL
 Fork of the original mod by HzanRsxa2959, which aims to improve &amp; fix the original mod.
