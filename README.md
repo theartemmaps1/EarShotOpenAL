@@ -14,6 +14,8 @@ So he told me if i could do something about it, and that's where things began to
 I began by changing the sound engine from deprecated "irrKlang" to OpenAL, which is used by most games and apps, fixing bugs and improving the mod.
 And that's how we are here! :) Have fun adding new sounds to your game! Max detailed instructions are down below.
 
+The .zip also includes four
+
 Most important: double check if your sound is MONO for 3D spatialization (otherwise if it's STEREO, it won't have distance attenuation and will play in 2D space!!!)
 But if you neeed it to be stereo, then let it be. Useful for bullet whizzing sounds only i think, since they have no position in 3D space.
 All audio files need to be exactly a .wav extension.
@@ -23,11 +25,14 @@ The mod has a couple of debug menu entries, such as logging toggle, and reloadin
 Credits go to the original EarShot author (HzanRsxa2959) for the original mod.
 
 Special thanks to:
-Shimada - testing.
-Mentraze - VC weapon pack & testing.
-Lividkilla66 - Driv3r footsteps pack & testing.
-Dun - Manhunt weapon pack & testing.
+Shimada — testing.
+Mentraze — VC weapon pack & testing.
+Lividkilla66 — Driv3r footsteps pack & testing.
+Dun — Manhunt weapon pack & testing.
+Matt1010 & Mentraze - for the logo.
 Get the latest OpenAL version here: https://github.com/kcat/openal-soft
+
+*GameFolder is the games root folder
 
 Q & A:
 
@@ -38,6 +43,16 @@ Q: Mod doesn't work, no replacement is happening!
 A: Double check paths, file names, also peep logs for some info, and more importantly, check if you have OpenAL32.dll in the root game folder
 (mod won't even inject if it's missing), and also check if you have "ModelExtras" mod on, because it disables this mod and replaces with it's own implementation.
 Nag Grinch to remove that :D.
+
+# Installation:
+
+The .asi and .ini file, as well as "EarShot" folder can be placed anywhere, (scripts, root, modloader), but the OpenAL32.dll should be in the root folder, always.
+
+
+Possible output:
+GameFolder\EarShot.asi, EarShot.ini, EarShot (folder), OpenAL32.dll
+GameFolder\scripts\EarShot.asi, EarShot.ini, EarShot (folder)
+GameFolder\modloader\EarShotMod\EarShot.asi, EarShot.ini, EarShot (folder)
 
 # 1. Weapon sounds:
 So adding new weapon shoot sounds is pretty much the same as you'd do it in previous version of EarShot. You'd create folder inside "EarShot" folder with any name
@@ -70,7 +85,7 @@ Possible output: GameFolder\EarShot\Minigun\spin.wav (for barrel spin loop).
 Possible output: GameFolder\EarShot\Minigun\spin_end.wav (for barrel spin end).
 
 # 1.2. Missiles:
-If you wish to have custom sounds for missiles, simply create a "Missiles" folder inside "EarShot" folder and place a "missile_flyloop.wav" file there. 
+If you wish to have custom sounds for missiles, simply create a "Missiles" folder inside "EarShot" folder and place a "missile_flyloop.wav" file there.
 Possible output: GameFolder\EarShot\Missiles\missile_flyloop.wav (LS gunfire for pistol).
 
 # 1.3. Rhino cannon:
@@ -131,7 +146,7 @@ You can find them at GameFolder\EarShot\generic\ricochet.
 Each subfolder can have the surface name that the bullet will hit ("default", "metal", "wood", "water", "dirt", "glass", "stone", "sand", "flesh")
 Same as footsteps, create a folder and add a audiofile named "ricochet.wav".
 
-Possible output:  GameFolder\EarShot\generic\ricochet\wood\step.wav (generic sound for wooden surface).
+Possible output: GameFolder\EarShot\generic\ricochet\wood\step.wav (generic sound for wooden surface).
 
 # 5. Fire sounds
 
@@ -195,6 +210,7 @@ Possible output: GameFolder\EarShot\generic\ambience\zones\creek\ambience.wav (d
 
 These work by priority, so if for example riots are happening, only those sounds will play, if you're in a zone, those will play.
 Next ambience sound will begin after some time after previous one ended.
+They choose a random far away position relative to the camera, and play.
 
 The "gunfire" subfolder specifies the LS gunshots ambience FX. It can have another folder in it with the name of the gun that it uses the sounds of to play.
 
@@ -223,3 +239,5 @@ For developers:
 This mod provides a export func named "GetContext", because if two plugins use OpenAL Soft at the same time, it can conflict, so use this func to get the context from this mod.
 
 Have fun!
+
+Join my discord server: https://discord.com/invite/4dxtJCwSx8
