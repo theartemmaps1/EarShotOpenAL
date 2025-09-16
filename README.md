@@ -2,7 +2,7 @@
 Fork of the original mod by HzanRsxa2959, which aims to improve &amp; fix the original mod.
 
                                       
-					<img width="3840" height="2160" alt="image" src="https://github.com/user-attachments/assets/51e200e2-9ed0-4072-bc75-49aad0972bcb" />
+					[<img width="3840" height="2160" alt="image" src="https://github.com/user-attachments/assets/51e200e2-9ed0-4072-bc75-49aad0972bcb" />](https://github.com/user-attachments/assets/51e200e2-9ed0-4072-bc75-49aad0972bcb)
 
 									
 Hi there! I really suggest you to read it all, so you'd fully understand how to add new sounds to your SA build! ( If didn't, not my problem :) )
