@@ -9,6 +9,11 @@
 #include <filesystem>
 #include "logging.h"
 #include <unordered_set>
+#include <map>
+#include "include/subhook-0.8.2/subhook.h"
+#include <CExplosion.h>
+#include <eAudioEvents.h>
+#include "AudioManager.h"
 using namespace plugin;
 using namespace std;
 namespace fs = std::filesystem;
@@ -17,82 +22,94 @@ static CdeclEvent <AddressList<0x564372, H_CALL>, PRIORITY_AFTER, ArgPickNone, v
 static CdeclEvent <AddressList<0x56A46E, H_CALL>, PRIORITY_AFTER, ArgPickNone, void()> ClearExcitingStuffFromAreaEvent;
 static CdeclEvent <AddressList<0x56E975, H_CALL>, PRIORITY_AFTER, ArgPickNone, void()> MakePlayerSafeEvent;
 static CdeclEvent <AddressList<0x738AFF, H_CALL, 0x73997A, H_CALL, 0x739A17, H_CALL, 0x739AD0, H_CALL>, PRIORITY_AFTER, ArgPickN<CEntity*, 0>, void(CEntity* ent)> WorldRemoveProjEvent;
-static uint32_t interiorIntervalMin = 5000;  // ms
-static uint32_t interiorIntervalMax = 10000; // ms
-static uint32_t fireIntervalMin = 5000;
-static uint32_t fireIntervalMax = 10000;
-static uint32_t zoneIntervalMin = 5000;
-static uint32_t zoneIntervalMax = 10000;
-// Store audios data
-struct SoundInstance
-{
-	// The source per instance
-	ALuint source = 0;
-	// Entity the sounds is attached too
-	CPhysical* entity = nullptr;
-	// These two below are only used when the game get's paused
-	float pauseOffset = 0.0f;
-	bool paused = false;
-	// Name's and path's data
-	std::string nameBuffer;
-	fs::path path;
-	const char* name;
-	// The sound pos in the world
-	CVector pos;
-	bool isPossibleGunFire = false;
-	ALuint filter = 0;
-	ALuint missileSource = 0;
-	bool bIsMissile = false;
-	// Minigun barrel stuff
-	bool spinEndStarted = false;
-	bool minigunBarrelSpin = false;
-	// Ambience stuff
-	bool isAmbience = false;
-	bool isGunfireAmbience = false;
-	bool isInteriorAmbience = false;
-	eWeaponType WeaponType;
-	CPed* shooter = nullptr;
-	ALenum spinningstatus;
-	float baseGain = 1.0f;
-	bool isFire = false;
-	FxSystem_c* fireFX = nullptr;
-	CFire* firePtr = nullptr;
+inline uint32_t interiorIntervalMin = 5000;  // ms
+inline uint32_t interiorIntervalMax = 10000; // ms
+inline uint32_t fireIntervalMin = 5000;
+inline uint32_t fireIntervalMax = 10000;
+inline uint32_t zoneIntervalMin = 5000;
+inline uint32_t zoneIntervalMax = 10000;
 
-	~SoundInstance() = default;
-};
-
-// Main array to manage ALL currently playing sounds
-static std::vector<std::shared_ptr<SoundInstance>> audiosplaying;
-//static std::unordered_set<ALuint> pausedFireSources;
-static void PauseAudio(SoundInstance* audio) {
-	if (!audio->paused) {
-		//if (audio->isFire) pausedFireSources.insert(audio->source);
-		alGetSourcef(audio->source, AL_SEC_OFFSET, &audio->pauseOffset);
-		alSourcePause(audio->source);
-		audio->paused = true;
+inline auto modname = string("EarShot");
+inline auto modMessage = [&](const string& messagetext, UINT messageflags = MB_OK) {
+	if (!Error("%s: %s", modname.c_str(), messagetext.c_str()))
+	{
+		exit(0);
 	}
-}
+	return 0;
+	};
+inline auto modextension = string(".earshot");
 
-static void ResumeAudio(SoundInstance* audio) {
-	if (audio->paused) {
-		//if (audio->isFire) pausedFireSources.erase(audio->source);
-		alSourcef(audio->source, AL_SEC_OFFSET, audio->pauseOffset);
-		alSourcePlay(audio->source);
-		audio->paused = false;
-	}
-}
+// Paths
+inline auto folderroot = fs::path(GAME_PATH(""));
+inline auto foldermod = fs::path(PLUGIN_PATH("")) / fs::path(modname);
+inline auto folderdata = folderroot / fs::path("data") / fs::path(modname);
+inline auto rootlength = folderroot.string().length();
+inline auto outputPath = [&](fs::path* filepath)
+	{
+		string s = filepath->string();
+		return s.erase(0, rootlength);
+	};
 
-class AudioStream;
-struct SoundInstance;
+// String cases converting
+inline auto caseLower = [&](string casedstring)
+	{
+		string caseless;
+		for (char ch : casedstring) {
+			if (ch >= 'A' && ch <= 'Z') ch = tolower(ch);
+			caseless += ch;
+		}
+		return caseless;
+	};
+inline auto caseUpper = [&](string casedstring)
+	{
+		string caseless;
+		for (char ch : casedstring) {
+			if (ch >= 'a' && ch <= 'z') ch = toupper(ch);
+			caseless += ch;
+		}
+		return caseless;
+	};
+
 struct ThrownWeapon {
 	int32_t explosionType;
 	int32_t weaponType;
 };
+
+inline auto nameType = [&](string* weaponname, eWeaponType* weapontype)
+	{
+		char weaponchar[255]; sprintf(weaponchar, "%s", caseUpper(*weaponname).c_str());
+		*weapontype = CWeaponInfo::FindWeaponType(weaponchar);
+		return (*weapontype >= eWeaponType::WEAPONTYPE_UNARMED);
+	};
+
+inline int initializationstatus = -2;
+
+typedef void(__thiscall* originalCAEWeaponAudioEntity__WeaponFire)(eWeaponType weaponType, CPhysical* entity, int audioEventId);
+typedef void(__thiscall* originalCAEWeaponAudioEntity__WeaponReload)(eWeaponType weaponType, CPhysical* entity, int audioEventId);
+typedef void(__thiscall* originalCAEPedAudioEntity__HandlePedHit)(int a2, CPhysical* a3, unsigned __int8 a4, float a5, unsigned int a6);
+typedef char(__thiscall* originalCAEPedAudioEntity__HandlePedSwing)(int a2, int a3, int a4);
+typedef void(__thiscall* originalCAEExplosionAudioEntity__AddAudioEvent)(int event, CVector* pos, float volume);
+typedef char(__thiscall* originalCAEPedAudioEntity__HandlePedJacked)(int AudioEvent);
+typedef void(__thiscall* originalCAEFireAudioEntity__AddAudioEvent)(int AudioEvent, CVector* posn);
+typedef int(__fastcall* originalCAudioEngine__ReportBulletHit)(CEntity* entity, eSurfaceType surface, const CVector& posn, float angleWithColPointNorm);
+typedef void(__thiscall* originalCAEPedAudioEntity__AddAudioEvent)(eAudioEvents event, float volume, float speed, CPhysical* ped, uint8_t surfaceId, int32_t a7, uint32_t maxVol);
+typedef bool(__cdecl* originalCExplosion__AddExplosion)(CEntity* victim, CEntity* creator, eExplosionType type, CVector pos, uint32_t lifetime, uint8_t usesSound, float cameraShake, uint8_t bInvisible);
+typedef void(__thiscall* originalCAudioEngine__ReportFrontEndAudioEvent)(eAudioEvents eventId, float volumeChange, float speed);
+inline auto subhookCAEWeaponAudioEntity__WeaponFire = subhook_t();
+inline auto subhookCAEWeaponAudioEntity__WeaponReload = subhook_t();
+inline auto subhookCAEPedAudioEntity__HandlePedHit = subhook_t();
+inline auto subhookCAEPedAudioEntity__HandlePedSwing = subhook_t();
+inline auto subhookCAEExplosionAudioEntity__AddAudioEvent = subhook_t();
+inline auto subhookCAEPedAudioEntity__HandlePedJacked = subhook_t();
+inline auto subhookCAEFireAudioEntity__AddAudioEvent = subhook_t();
+inline auto subhookCAudioEngine__ReportBulletHit = subhook_t();
+inline auto subhookCAEPedAudioEntity__AddAudioEvent = subhook_t();
+inline auto subhookCExplosion__AddExplosion = subhook_t();
+inline auto subhookCAudioEngine__ReportFrontEndAudioEvent = subhook_t();
+
 // Define them all in a structure for a better readability
 struct Buffers
 {
-	//std::vector<AudioStream> registeredExplosions;
-	//std::vector<AudioStream> registeredExplosionsDebris;
 	std::unordered_map<CFire*, std::shared_ptr<SoundInstance>> fireSounds;
 	std::unordered_map<int, std::shared_ptr<SoundInstance>> nonFireSounds;
 	std::vector<CAEFireAudioEntity*> ent;
@@ -101,7 +118,6 @@ struct Buffers
 	std::vector<ALuint> explosionsDebrisBuffers;
 	std::vector<ALuint> explosionDistantBuffers;
 	std::vector<ALuint> ricochetBuffers;
-	//fs::path* weaponpath;
 	std::unordered_map<std::string, std::vector<ALuint>> ricochetBuffersPerMaterial;
 	std::unordered_map<std::string, std::vector<ALuint>> footstepBuffersPerSurface;
 	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>> footstepShoeBuffers;
@@ -129,8 +145,8 @@ struct Buffers
 	std::unordered_map<std::string, std::vector<ALuint>> GlobalZoneAmbienceBuffers_Day;
 	std::unordered_map<std::string, std::vector<ALuint>> GlobalZoneAmbienceBuffers_Night;
 	std::unordered_map<std::string, std::vector<ALuint>> GlobalZoneAmbienceBuffers_Riot;
-	std::vector<ALuint> AmbienceBuffs; // old generic ambience buffers
-	// New map for weapon-specific ambience sounds by weapon type enum
+	std::vector<ALuint> AmbienceBuffs;
+	// map for weapon-specific ambience sounds by weapon type enum
 	std::unordered_map<eWeaponType, ALuint> WeaponTypeAmbienceBuffers;
 	std::vector<ALuint> missileSoundBuffers;
 	std::vector<ALuint> tankCannonFireBuffers;
@@ -138,15 +154,9 @@ struct Buffers
 	std::vector<ALuint> bulletWhizzLeftFrontBuffers;
 	std::vector<ALuint> bulletWhizzRightRearBuffers;
 	std::vector<ALuint> bulletWhizzRightFrontBuffers;
-	//std::unordered_map<int, std::vector<ALuint>> WeaponTypeExplosionBuffers;
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeExplosionBuffers;
-	//std::unordered_map<int, std::vector<ALuint>> ExplosionTypeMolotovBuffers;
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeDistantBuffers;
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeDebrisBuffers;
-	//std::unordered_map<int, std::vector<ALuint>> WeaponTypeMolotovBuffers;
-	//std::unordered_map<int, std::vector<ALuint>> WeaponTypeDistantBuffers;
-	//std::unordered_map<int, std::vector<ALuint>> WeaponTypeDebrisBuffers;
-	//std::unordered_map<CEntity*, int32_t> g_WeaponTypes;
 	std::unordered_map<CEntity*, int32_t> g_ExplosionTypes;
 };
 
@@ -196,7 +206,7 @@ inline void DeleteBufferMapSingle(std::unordered_map<eWeaponType, ALuint>& map) 
 	map.clear();
 }
 
-static void DeleteAllBuffers(Buffers& b) {
+inline void DeleteAllBuffers(Buffers& b) {
 	DeleteBufferVector(b.explosionBuffers);
 	DeleteBufferVector(b.molotovExplosionBuffers);
 	DeleteBufferVector(b.explosionsDebrisBuffers);
@@ -280,170 +290,32 @@ static void DeleteAllBuffers(Buffers& b) {
 	b.g_ExplosionTypes.clear();
 }
 
-// To avoid constant OpenAL blocks, we use this func for everything.
-// Used to play 3D sounds in a 3D space.
-// For 2D sounds we use the other func called "playBuffer2D".
-// Note that this plays the sound only ONCE and looping is only done for missiles/fire/minigun barrel here and managed separately.
-// @returns true on success, false otherwise.
-static auto playBuffer = [&](ALuint buff/*const std::vector<ALuint>* buffersInVector = nullptr, ALuint singleBuff = 0*/,
-	float maxDist = FLT_MAX,
-	float gain = 1.0f,
-	float airAbsorption = 1.0f,
-	float refDist = 1.0f,
-	float rollOffFactor = 1.0f, float pitch = 1.0f,
-	CVector pos = CVector(0.0f, 0.0f, 0.0f), bool isFire = false,
-	CFire* firePtr = nullptr,
-	int fireEventID = 0, std::shared_ptr<SoundInstance>* outInst = nullptr,
-	CPhysical* ent = nullptr, bool isPossibleGunFire = false,
-	fs::path* path = nullptr, std::string nameBuff = "",
-	bool isMinigunBarrelSpin = false, CPed* shooter = nullptr, eWeaponType weapType = eWeaponType(0), bool isGunfire = false,
-	bool isInteriorAmbience = false, bool isMissile = false, bool looping = false, uint32_t delay = 0, bool isAmbience = false, FxSystem_c* fireFX = nullptr) -> bool
-	{
-		//float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
-		//float audiovolume = gain * fader;
-		// No point in continuing, there's no valid buffers!
-		if (!alIsBuffer(buff)) return false;
+#define AUDIOPLAY(MODELID, FILESTEM) AudioManager.findWeapon(&weaponType, eModelID(MODELID), std::string(FILESTEM), entity, true)
+#define AUDIOSHOOT(MODELID) AUDIOPLAY(MODELID, "shoot")
+#define AUDIOAFTER(MODELID) AUDIOPLAY(MODELID, "after")
+#define AUDIODRYFIRE(MODELID) AUDIOPLAY(MODELID, "dryfire")
+#define AUDIOLOWAMMO(MODELID) AUDIOPLAY(MODELID, "low_ammo")
+#define AUDIORELOAD(MODELID, RETURNVALUE) AUDIOPLAY(MODELID, "reload", RETURNVALUE)
+#define AUDIORELOAD1(MODELID, RETURNVALUE) AUDIOPLAY(MODELID, "reload_one", RETURNVALUE)
+#define AUDIORELOAD2(MODELID, RETURNVALUE) AUDIOPLAY(MODELID, "reload_two", RETURNVALUE)
+#define AUDIOHIT(MODELID) AUDIOPLAY(MODELID, "hit")
+#define AUDIOMARTIALPUNCH(MODELID) AUDIOPLAY(MODELID, "martial_punch")
+#define AUDIOMARTIALKICK(MODELID) AUDIOPLAY(MODELID, "martial_kick")
+#define AUDIOHITMETALT(MODELID) AUDIOPLAY(MODELID, "hitmetal")
+#define AUDIOHITWOOD(MODELID) AUDIOPLAY(MODELID, "hitwood")
+#define AUDIOHITGROUND(MODELID) AUDIOPLAY(MODELID, "stomp")
+#define AUDIOSWING(MODELID) AUDIOPLAY(MODELID, "swing")
+#define AUDIOSPINEND(MODELID) AUDIOPLAY(MODELID, "spin_end")
+#define AUDIOCALL(AUDIOMACRO) \
+    ((entity->m_nType == eEntityType::ENTITY_TYPE_PED && AUDIOMACRO(MODELUNDEFINED)) || AUDIOMACRO(entity->m_nModelIndex))
+#define MODELUNDEFINED eModelID(-1)
 
-		auto inst = std::make_shared<SoundInstance>();
-		alGenSources(1, &inst->source);
-		// Is it a valid source?
-		if (!alIsSource(inst->source)) 
-		{
-			return false;
-		}
-		ALboolean useLooping = AL_FALSE;
-		if (isFire || isMissile || looping) 
-		{
-			useLooping = AL_TRUE;
-		}
-		alSourcei(inst->source, AL_BUFFER, buff);
-		alSource3f(inst->source, AL_POSITION, pos.x, pos.y, pos.z);
-		alSourcef(inst->source, AL_GAIN, gain);
-		alSourcef(inst->source, AL_AIR_ABSORPTION_FACTOR, airAbsorption);
-		alSourcef(inst->source, AL_PITCH, pitch);
-		alSourcei(inst->source, AL_LOOPING, useLooping);
-		alSourcef(inst->source, AL_REFERENCE_DISTANCE, refDist);
-		alSourcef(inst->source, AL_MAX_DISTANCE, maxDist);
-		alSourcef(inst->source, AL_ROLLOFF_FACTOR, rollOffFactor);
-		//AttachReverbToSource(inst->source);
-		static uint32_t playStartTime = 0;
-
-		if (ent && ent->m_nType == ENTITY_TYPE_PED) {
-			auto ped = reinterpret_cast<CPed*>(ent);
-			eWeaponType weaponType = ped->m_aWeapons[ped->m_nSelectedWepSlot].m_eWeaponType;
-			CWeaponInfo* weapInfo = CWeaponInfo::GetWeaponInfo(weaponType, WEAPSKILL_STD);
-
-			if (weapInfo) {
-				unsigned int anim = weapInfo->m_nAnimToPlay;
-				bool isMinigun = (weaponType == WEAPONTYPE_MINIGUN ||
-					(anim == ANIM_GROUP_FLAME && weapInfo->m_nWeaponFire == WEAPON_FIRE_INSTANT_HIT));
-
-				if (isMinigun) {
-					if (CTimer::m_snTimeInMilliseconds - playStartTime > delay) {
-						playStartTime = CTimer::m_snTimeInMilliseconds;
-						alSourcePlay(inst->source);
-					}
-				}
-				else {
-					alSourcePlay(inst->source);
-				}
-			}
-		}
-		else {
-			alSourcePlay(inst->source);
-		}
-		if (path && !path->empty()) {
-			inst->path = *path;
-			if (!nameBuff.empty())
-				inst->nameBuffer = nameBuff;
-		}
-		if (!inst->nameBuffer.empty()) 
-		{
-			inst->name = inst->nameBuffer.c_str();
-		}
-
-		inst->entity = ent;
-		inst->pos = pos;
-		inst->isPossibleGunFire = isPossibleGunFire;
-		inst->minigunBarrelSpin = isMinigunBarrelSpin;
-		inst->shooter = shooter;
-		inst->WeaponType = weapType;
-		inst->pos = pos;
-		inst->isAmbience = isAmbience;
-		inst->isGunfireAmbience = isGunfire;
-		inst->isInteriorAmbience = isInteriorAmbience;
-		inst->bIsMissile = isMissile;
-		inst->baseGain = gain;
-
-		if (inst->bIsMissile) 
-		{
-			inst->missileSource = inst->source;
-		}
-
-		if (!inst->path.empty() && !inst->nameBuffer.empty() && inst->name)
-		{
-			Log("playBuffer: path: %s, nameBuffer: %s, name: %s", inst->path.string().c_str(), inst->nameBuffer.c_str(), inst->name);
-		}
-		if (outInst) 
-		{
-			*outInst = inst;
-		}
-		if (isFire) {
-			inst->isFire = isFire;
-			inst->fireFX = fireFX;
-			inst->entity = nullptr;
-			inst->shooter = nullptr;
-			if (firePtr) {
-				inst->firePtr = firePtr;
-				g_Buffers.fireSounds[firePtr] = inst;
-			}
-		}
-		else if (fireEventID != 0) {
-			inst->isFire = false;
-			inst->firePtr = nullptr;
-			inst->entity = nullptr;
-			inst->shooter = nullptr;
-			g_Buffers.nonFireSounds[fireEventID] = inst;
-		}
-		if (inst) 
-		{
-			audiosplaying.push_back(std::move(inst));
-			return true;
-		}
-		return false;
-	};
-
-static auto setSourceGain = [&](ALuint source, float gain) -> bool
-	{
-		// Is it a valid source?
-		if (!alIsSource(source)) return false;
-		alSourcef(source, AL_GAIN, gain);
-		return true;
-	};
-
-static auto playBuffer2D = [&](ALuint buff, bool relative, float volume, float pitch) -> bool
-{
-		// No point in continuing, there's no valid buffers!
-		if (!alIsBuffer(buff)) return false;
-
-		auto inst = std::make_shared<SoundInstance>();
-		alGenSources(1, &inst->source);
-		// Is it a valid source?
-		if (!alIsSource(inst->source))
-		{
-			return false;
-		}
-		alSourcei(inst->source, AL_BUFFER, buff);
-		alSourcei(inst->source, AL_SOURCE_RELATIVE, relative);
-		alSourcef(inst->source, AL_GAIN, volume);
-		alSourcef(inst->source, AL_PITCH, pitch);
-		alSourcePlay(inst->source);
-		return true;
-};
+// Game camera pos
+inline CVector cameraposition;
 
 // Surface helpers
 class SurfaceInfos_c;
-static SurfaceInfos_c& g_surfaceInfos = *reinterpret_cast<SurfaceInfos_c*>(0xB79538);
+inline SurfaceInfos_c& g_surfaceInfos = *reinterpret_cast<SurfaceInfos_c*>(0xB79538);
 // 0x55EA30
 inline bool IsAudioConcrete(uint32_t id)
 {
@@ -496,30 +368,6 @@ inline bool IsAudioLongGrass(uint32_t id)
 inline bool IsAudioTile(uint32_t id)
 {
 	return CallMethodAndReturn<bool, 0x55EB30, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Bullet FX
-// 0x55E670
-uint32_t GetBulletFx(uint32_t id) {
-	return CallMethodAndReturn<uint32_t, 0x55E670, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Soft landing
-// 0x55E690
-inline bool IsSoftLanding(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E690, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// See-through
-// 0x55E6B0
-inline bool IsSeeThrough(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E6B0, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Shoot-through
-// 0x55E6D0
-inline bool IsShootThrough(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E6D0, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
 }
 
 // Sand
@@ -617,108 +465,6 @@ inline bool IsPavement(uint32_t id) {
 	return CallMethodAndReturn<bool, 0x55E7F0, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
 }
 
-// Roughness
-// 0x55E810
-uint32_t GetRoughness(uint32_t id) {
-	return CallMethodAndReturn<uint32_t, 0x55E810, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Flammability
-// 0x55E830
-uint32_t GetFlammability(uint32_t id) {
-	return CallMethodAndReturn<uint32_t, 0x55E830, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Sparks
-// 0x55E850
-inline bool CreatesSparks(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E850, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Can't sprint
-// 0x55E870
-inline bool CantSprintOn(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E870, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Footsteps
-// 0x55E890
-inline bool LeavesFootsteps(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E890, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Foot dust
-// 0x55E8B0
-inline bool ProducesFootDust(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E8B0, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Makes car dirty
-// 0x55E8D0
-inline bool MakesCarDirty(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E8D0, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Makes car clean
-// 0x55E8F0
-inline bool MakesCarClean(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E8F0, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Wheel grass
-// 0x55E910
-inline bool CreatesWheelGrass(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E910, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Wheel gravel
-// 0x55E930
-inline bool CreatesWheelGravel(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E930, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Wheel mud
-// 0x55E950
-inline bool CreatesWheelMud(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E950, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Wheel dust
-// 0x55E970
-inline bool CreatesWheelDust(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E970, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Wheel sand
-// 0x55E990
-inline bool CreatesWheelSand(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E990, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Wheel spray
-// 0x55E9B0
-inline bool CreatesWheelSpray(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E9B0, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Plants
-// 0x55E9D0
-inline bool CreatesPlants(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E9D0, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Objects
-// 0x55E9F0
-inline bool CreatesObjects(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55E9F0, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
-// Climb
-// 0x55EA10
-inline bool CanClimb(uint32_t id) {
-	return CallMethodAndReturn<bool, 0x55EA10, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
-}
-
 
 inline float sq(float x)
 {
@@ -766,42 +512,6 @@ private:
 	std::mt19937 rng;
 };
 
-
-static uint8_t ComputeVolume(uint8_t emittingVolume, float maxDistance, float distance)
-{
-	float minDistance;
-	uint8_t newEmittingVolume;
-
-	if (AEAudioHardware.m_fEffectMasterScalingFactor <= 0.0f)
-		return 0;
-
-	if (distance > maxDistance)
-		return 0;
-
-	if (maxDistance <= 0.0f)
-		return 0;
-
-	minDistance = maxDistance / 5.0f;
-
-	if (minDistance > distance)
-		newEmittingVolume = emittingVolume;
-	else {
-		float fadeFactor = (maxDistance - minDistance - (distance - minDistance)) / (maxDistance - minDistance);
-		newEmittingVolume = emittingVolume * SQR(fadeFactor);
-	}
-
-	float finalVolume = newEmittingVolume * AEAudioHardware.m_fEffectMasterScalingFactor;
-
-	return static_cast<uint8_t>(std::min(127.0f, finalVolume));
-}
-
-
-inline float GetDistanceSquared(const CVector& v)
-{
-	const CVector& c = TheCamera.GetPosition();
-	return sq(v.x - c.x) + sq(v.y - c.y) + sq((v.z - c.z) * 0.2f);
-}
-
 inline bool IsMatchingName(const char* name, std::initializer_list<const char*> values) {
 	for (auto val : values) {
 		if (_strcmpi(name, val) == 0)
@@ -818,39 +528,10 @@ inline bool NameStartsWithIndexedSuffix(const char* name, const std::string& pre
 	}
 	return false;
 }
-#define Clamp2(v, center, radius) ((v) > (center) ? min(v, center + radius) : max(v, center - radius))
-static uint32_t ComputeDopplerEffectedFrequency(uint32_t oldFreq, float pos1, float pos2, float speedMultiplier, float timeStep, float speedOfSound) {
-	uint32_t newFreq = oldFreq;
-	if (!TheCamera.Get_Just_Switched_Status() && speedMultiplier != 0.0f) {
-		float dist = pos2 - pos1;
-		if (dist != 0.0f) {
-			float speedOfSource = (dist / timeStep) * speedMultiplier;
-			if (speedOfSound > fabs(speedOfSource)) {
-				speedOfSource = Clamp2(speedOfSource, 0.0f, 1.5f);
-				newFreq = static_cast<uint32_t>((oldFreq * speedOfSound) / (speedOfSource + speedOfSound));
-			}
-		}
-	}
-	return newFreq;
-}
 
-inline CVector MultiplyInverse(const CMatrix& mat, const CVector& vec)
-{
-	CVector v(vec.x - mat.pos.x, vec.y - mat.pos.y, vec.z - mat.pos.z);
-	return CVector(
-		mat.right.x * v.x + mat.right.y * v.y + mat.right.z * v.z,
-		mat.GetForward().x * v.x + mat.GetForward().y * v.y + mat.GetForward().z * v.z,
-		mat.up.x * v.x + mat.up.y * v.y + mat.up.z * v.z);
+inline bool AddExplosion(CEntity* victim, CEntity* creator, int32_t explosionType, CVector& posn, unsigned int time, unsigned char makeSound, float camShake, unsigned char visibility) {
+	return plugin::CallAndReturn<bool, 0x736A50>(victim, creator, explosionType, posn, time, makeSound, camShake, visibility);
 }
-static void TranslateEntity(const CVector* in, CVector* out)
-{
-	*out = MultiplyInverse(*TheCamera.GetMatrix(), *in);
-}
-
-static bool AddExplosion(CEntity* victim, CEntity* creator, int32_t explosionType, CVector& posn, unsigned int time, unsigned char makeSound, float camShake, unsigned char visibility) {
-	return plugin::CallAndReturn<bool, 0x736A50, CEntity*, CEntity*, int32_t, CVector, unsigned int, unsigned char, float, unsigned char>(victim, creator, explosionType, posn, time, makeSound, camShake, visibility);
-}
-bool PlayAmbienceSFX(const CVector& origin, eWeaponType weaponType = eWeaponType(0), bool useOldAmbience = false);
 
 inline CVector operator/(const CVector& left, float right)
 {
@@ -862,8 +543,3 @@ CrossProduct(const CVector& v1, const CVector& v2)
 {
 	return CVector(v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x);
 }
-
-//extern std::string version, NewVersion;
-
-//static int g_lastExplosionType = -1;
-//static int g_lastWeaponType    = -1;
