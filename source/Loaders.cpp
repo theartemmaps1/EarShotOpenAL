@@ -398,6 +398,94 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 			}
 		}
 	}
+
+	// Manual ambiences
+	fs::path manualIni = ambientDir / "map_ambience.ini";
+	if (fs::exists(manualIni) && fs::is_regular_file(manualIni)) {
+		try {
+			CIniReader ini(manualIni.string().c_str());
+
+			// We don't require a count; iterate numbered sections until none found
+			for (int i = 0; ; ++i) {
+				char section[64];
+				sprintf_s(section, "Ambience%d", i);
+
+				std::string files = ini.ReadString(section, "File", "");
+				if (files.empty()) {
+					break;
+				}
+
+				float x = ini.ReadFloat(section, "X", 0.0f);
+				float y = ini.ReadFloat(section, "Y", 0.0f);
+				float z = ini.ReadFloat(section, "Z", 0.0f);
+				float range = ini.ReadFloat(section, "Range", 50.0f);
+				float maxDist = ini.ReadFloat(section, "Max distance attenuation", 50.0f);
+				float refDist = ini.ReadFloat(section, "Reference distance", 1.0f);
+				float rollOff = ini.ReadFloat(section, "Roll off factor", 1.0f);
+				bool loop = ini.ReadBoolean(section, "Loop", false);
+				uint32_t delay = (uint32_t)ini.ReadInteger(section, "Delay", 30000);
+				std::string timeStr = ini.ReadString(section, "Time", "any");
+
+				EAmbienceTime timeType = EAmbienceTime::Any;
+				std::transform(timeStr.begin(), timeStr.end(), timeStr.begin(), ::tolower);
+				if (timeStr == "day") timeType = EAmbienceTime::Day;
+				else if (timeStr == "night") timeType = EAmbienceTime::Night;
+				else if (timeStr == "riot") timeType = EAmbienceTime::Riot;
+				else timeType = EAmbienceTime::Any;
+
+				// Split the File= line by commas
+				std::vector<ALuint> buffers;
+				std::stringstream ss(files);
+				std::string token;
+				while (std::getline(ss, token, ',')) {
+					// Trim whitespace
+					token.erase(0, token.find_first_not_of(" \t\r\n"));
+					token.erase(token.find_last_not_of(" \t\r\n") + 1);
+
+					if (token.empty())
+						continue;
+
+					// Resolve file path: allow absolute or relative to ambientDir
+					fs::path audioPath = token.front() == '/' || (token.size() > 1 && token[1] == ':')
+						? fs::path(token)
+						: ambientDir / token;
+
+					if (!fs::exists(audioPath)) {
+						Log("Manual ambience file not found: %s (section %s)", audioPath.string().c_str(), section);
+						continue;
+					}
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(audioPath.string().c_str());
+					if (buffer == 0) {
+						Log("Failed to create buffer for manual ambience: %s", audioPath.string().c_str());
+						continue;
+					}
+					buffers.push_back(buffer);
+				}
+					if (!buffers.empty()) {
+						ManualAmbience ma;
+						ma.pos = CVector(x, y, z);
+						ma.range = range;
+						ma.loop = loop;
+						ma.buffer = buffers;
+						ma.time = timeType;
+						ma.delay = delay;
+						ma.nextPlayTime = 0;
+						ma.sphere.Set(ma.range, ma.pos);
+						ma.refDist = refDist;
+						ma.rollOff = rollOff;
+						ma.maxDist = maxDist;
+
+						g_ManualAmbiences.push_back(ma);
+
+						Log("Loaded manual ambience (section %s): %s @(%.1f, %.1f, %.1f) R=%.1f Loop=%d Time=%s Buffers=%zu",
+							section, files.c_str(), x, y, z, range, loop, timeStr.c_str(), g_ManualAmbiences.back().buffer.size());
+					}
+			}
+		}
+		catch (...) {
+			Log("Failed to parse manual ambience ini: %s", manualIni.string().c_str());
+		}
+	}
 }
 
 
@@ -434,6 +522,8 @@ void Loaders::ReloadAudioFolders()
 	fireIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Ambience interval max", 10000);
 	zoneIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Zone ambience interval min", 5000);
 	zoneIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Zone ambience interval max", 10000);
+	distanceForDistantGunshot = ini.ReadFloat("MAIN", "Distant gunshot distance", 50.0f);
+	distanceForDistantExplosion = ini.ReadFloat("MAIN", "Distant explosion distance", 100.0f);
 	// Stop and delete all currently playing sound sources
 	for (auto& inst : AudioManager.audiosplaying)
 	{
@@ -483,7 +573,7 @@ void Loaders::ReloadAudioFolders()
 	DeleteAllBuffers(g_Buffers);
 	registeredweapons.clear();
 	weaponNames.clear();
-
+	AudioManager.UnloadManualAmbiences();
 	// Finally reload all folders
 	LoadExplosionRelatedSounds(foldermod);
 	LoadJackingRelatedSounds(foldermod);

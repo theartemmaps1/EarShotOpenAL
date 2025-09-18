@@ -28,6 +28,8 @@ inline uint32_t fireIntervalMin = 5000;
 inline uint32_t fireIntervalMax = 10000;
 inline uint32_t zoneIntervalMin = 5000;
 inline uint32_t zoneIntervalMax = 10000;
+inline float distanceForDistantExplosion = 100.0f;
+inline float distanceForDistantGunshot = 50.0f;
 
 inline auto modname = string("EarShot");
 inline auto modMessage = [&](const string& messagetext, UINT messageflags = MB_OK) {
@@ -293,6 +295,7 @@ inline void DeleteAllBuffers(Buffers& b) {
 #define AUDIOPLAY(MODELID, FILESTEM) AudioManager.findWeapon(&weaponType, eModelID(MODELID), std::string(FILESTEM), entity, true)
 #define AUDIOSHOOT(MODELID) AUDIOPLAY(MODELID, "shoot")
 #define AUDIOAFTER(MODELID) AUDIOPLAY(MODELID, "after")
+#define AUDIODISTANT(MODELID) AUDIOPLAY(MODELID, "distant")
 #define AUDIODRYFIRE(MODELID) AUDIOPLAY(MODELID, "dryfire")
 #define AUDIOLOWAMMO(MODELID) AUDIOPLAY(MODELID, "low_ammo")
 #define AUDIORELOAD(MODELID, RETURNVALUE) AUDIOPLAY(MODELID, "reload", RETURNVALUE)
@@ -472,6 +475,13 @@ inline float sq(float x)
 }
 
 #define SQR(x) ((x) * (x))
+
+inline float SquaredMagnitude(const CVector& vec) {
+	return vec.x * vec.x + vec.y * vec.y + vec.z * vec.z;
+}
+inline bool IsPointWithinSphere(const CSphere& sphere, const CVector& p) {
+	return SquaredMagnitude(p - sphere.m_vecCenter) <= sq(sphere.m_fRadius);
+}
 
 #include <numeric>   // std::iota
 #include <random>    // std::mt19937, std::random_device

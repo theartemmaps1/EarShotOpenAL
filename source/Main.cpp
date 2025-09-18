@@ -116,6 +116,14 @@ auto __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 		}
 	}
 
+	if (dist > distanceForDistantGunshot) {
+		if (AUDIOCALL(AUDIODISTANT))
+		{
+			alternatePlayed = true;
+		}
+		if (alternatePlayed) return;
+	}
+
 	// Try alternate shoot + after sounds
 	for (int i = 0; i < 10; ++i) {
 		std::string altShoot = "shoot" + std::to_string(i);
@@ -376,9 +384,8 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 
 	float dist = DistanceBetweenPoints(cameraposition, *posn);
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
-	const float distantThreshold = 100.0f;
 	// We only process those that aren't really far away (except for distant sounds)
-	bool farAway = dist > distantThreshold;
+	bool farAway = dist > distanceForDistantExplosion;
 	bool handled = false;
 
 	auto OG = [&]()
@@ -433,7 +440,7 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 
 			int id = rnd.next();
 			ALuint buff = (*explosionBuffers)[id];
-			handled = AudioManager.PlaySource(buff, distantThreshold, AEAudioHardware.m_fEffectMasterScalingFactor /** 5.0f*/, 0.6f, 9.0f, 0.7f, pitch, *posn);
+			handled = AudioManager.PlaySource(buff, distanceForDistantExplosion, AEAudioHardware.m_fEffectMasterScalingFactor /** 5.0f*/, 0.6f, 9.0f, 0.7f, pitch, *posn);
 		}
 		else {
 			OG();
@@ -449,7 +456,7 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 
 			int id = rnd.next();
 			ALuint buff = (*debrisBuffers)[id];
-			handled = AudioManager.PlaySource(buff, distantThreshold, AEAudioHardware.m_fEffectMasterScalingFactor /** 5.0f*/, 0.8f, 7.0f, 1.0f, pitch, *posn);
+			handled = AudioManager.PlaySource(buff, distanceForDistantExplosion, AEAudioHardware.m_fEffectMasterScalingFactor /** 5.0f*/, 0.8f, 7.0f, 1.0f, pitch, *posn);
 		}
 	}
 	else {
@@ -528,7 +535,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		// Create a new non-fire sound (AudioManager.PlaySource will insert into nonFireSounds)
 		if (AudioManager.PlaySource(buffer, 200.0f, AEAudioHardware.m_fEffectMasterScalingFactor, 4.0f,
 			1.0f, 1.5f, pitch, position, false, nullptr, eventId, nullptr, nullptr,
-			false, nullptr, "", false, nullptr, WEAPONTYPE_UNARMED,
+			false, nullptr, std::string(), false, nullptr, WEAPONTYPE_UNARMED,
 			false, false, false, true))
 		{
 			return true;
@@ -579,7 +586,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		if (buffer == 0) return false;
 
 		if (AudioManager.PlaySource(buffer, 200.0f, AEAudioHardware.m_fEffectMasterScalingFactor /* fire->m_fStrength*/, 4.0f,
-			1.0f, 1.5f, pitch, pos, true, fire, 0, nullptr, nullptr, false, nullptr, "", false, nullptr))
+			1.0f, 1.5f, pitch, pos, true, fire, 0, nullptr, nullptr, false, nullptr, std::string(), false, nullptr))
 		{
 			return true;
 		}
@@ -989,7 +996,7 @@ char __fastcall HookedFireProjectile(
 						int index = rnd.next();
 						ALuint buff = g_Buffers.missileSoundBuffers[index];
 						AudioManager.PlaySource(buff, 250.0f, AEAudioHardware.m_fEffectMasterScalingFactor, 1.0f, 6.0f, 1.0f, pitch, physical->GetPosition(), false, nullptr, 0, nullptr, physical, false,
-							nullptr, "", false, nullptr, weaponType, false, false, true);
+							nullptr, std::string(), false, nullptr, weaponType, false, false, true);
 						//return char(-1);
 						handled = true;
 					}
@@ -1036,6 +1043,7 @@ bool __cdecl TriggerTankFireHooked(CEntity* victim, CEntity* creator, eExplosion
 	Log("CExplosion::AddExplosion: added explosion with type %d", type);
 	// We'll reuse this later for explosion-type specific explosion sounds
 	g_lastExplosionType[creator] = (int)type;
+	// Just to be sure
 	if (CPad::GetPad(0)->CarGunJustDown()) {
 		if (!g_Buffers.tankCannonFireBuffers.empty() && creator && creator->m_nType == ENTITY_TYPE_PED && ((CPed*)creator)->bInVehicle && type == EXPLOSION_TANK_FIRE)
 		{
@@ -1046,7 +1054,7 @@ bool __cdecl TriggerTankFireHooked(CEntity* victim, CEntity* creator, eExplosion
 			ALuint buffer = g_Buffers.tankCannonFireBuffers[index];
 			CVector pos = creator->GetPosition();
 			AudioManager.PlaySource(buffer, 125.0f, AEAudioHardware.m_fEffectMasterScalingFactor, 0.3f, 3.5f, 0.3f, pitch, pos, false, nullptr, 0, nullptr, (CPhysical*)creator,
-				false, nullptr, "", false);
+				false, nullptr, std::string(), false);
 		}
 	}
 	subhook_remove(subhookCExplosion__AddExplosion);
@@ -1358,9 +1366,6 @@ public:
 
 		ClearForRestartEvent += []()
 			{
-				// On restart, reload sound folders too
-				//ReloadAudioFolders();
-
 				// Reset ambience stuff on reload to prevent "never playing" issues
 				nextInteriorAmbienceTime = 0;
 				nextZoneAmbienceTime = 0;

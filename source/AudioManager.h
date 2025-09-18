@@ -59,6 +59,31 @@ struct SoundInstance
 	~SoundInstance() = default;
 };
 
+enum class EAmbienceTime { Any, Day, Night, Riot };
+
+struct ManualAmbience {
+	CVector pos;
+	float range;
+	bool loop;
+	std::vector<ALuint> buffer;
+	std::shared_ptr<SoundInstance> loopingInstance;
+	EAmbienceTime time;
+	uint32_t delay;
+	uint32_t nextPlayTime;
+	CSphere sphere;
+	float maxDist;
+	float refDist;
+	float rollOff;
+	ManualAmbience()
+		: pos{ 0.0f,0.0f,0.0f }, range(50.0f), loop(false), loopingInstance(nullptr), time(EAmbienceTime::Any), delay(0), nextPlayTime(0),
+		maxDist(50.0f), refDist(1.0f), rollOff(1.0f)
+	{
+		sphere.Set(range, pos);
+	}
+};
+
+extern std::vector<ManualAmbience> g_ManualAmbiences;
+
 inline CVector GetRandomAmbiencePosition(const CVector& origin, bool isThunder = false, bool isInteriorAmbience = false) {
 	float angle = (float)(CGeneral::GetRandomNumber() % 628) / 100.0f;
 	float distance = (isThunder ? 10.0f : (isInteriorAmbience ? 15.0f : 100.0f)) + (CGeneral::GetRandomNumber() % 80);
@@ -102,6 +127,9 @@ public:
 	bool PlaySource2D(ALuint buff, bool relative, float volume, float pitch);
 	void PauseSource(SoundInstance* inst);
 	void ResumeSource(SoundInstance* inst);
+	bool StartLoopingAmbience(ManualAmbience& ma);
+	void StopLoopingAmbience(ManualAmbience& ma);
+	void UnloadManualAmbiences();
 	bool PlaySource(ALuint buff,
 		float maxDist = FLT_MAX,
 		float gain = 1.0f,
@@ -122,7 +150,8 @@ public:
 	ALuint CreateOpenALBufferFromAudioFile(const fs::path& path);
 	void AudioPlay(fs::path* audiopath, CPhysical* audioentity);
 	bool findWeapon(eWeaponType* weapontype, eModelID modelid, std::string filename, CPhysical* audioentity, bool playAudio = true);
-	bool PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire = false, bool isThunder = false, bool isInteriorAmbience = false);
+	bool PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire = false, bool isThunder = false, bool isInteriorAmbience = false, bool isManual = false, float manualMaxDist = 250.0f,
+	float manualRefDist = 1.0f, float manualRollOff = 1.0f);
 	bool PlayAmbienceSFX(const CVector& origin, eWeaponType weaponType, bool useOldAmbience);
 	void PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapontype, bool spinning, bool playSpinEndSFX = false);
 	ALCcontext* GetContext()

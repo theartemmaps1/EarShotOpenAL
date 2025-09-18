@@ -15,7 +15,7 @@
 #include "vendor/dr_libs/dr_flac.h"
 #include "vendor/dr_libs/dr_mp3.h"
 #include <stb_vorbis.c>
-
+#include "CSphere.h"
 CAudioManager AudioManager;
 
 // Is FX supported?
@@ -24,6 +24,8 @@ bool CAudioManager::efxSupported = false;
 // Main array to manage ALL currently playing sounds
 std::vector<std::shared_ptr<SoundInstance>> CAudioManager::audiosplaying;
 map<string, ALuint> CAudioManager::gBufferMap;
+
+std::vector<ManualAmbience> g_ManualAmbiences;
 
 using namespace plugin;
 void CAudioManager::Initialize()
@@ -40,13 +42,10 @@ void CAudioManager::Initialize()
 	fireIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Ambience interval max", 10000);
 	zoneIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Zone ambience interval min", 5000);
 	zoneIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Zone ambience interval max", 10000);
+	distanceForDistantGunshot = ini.ReadFloat("MAIN", "Distant gunshot distance", 50.0f);
+	distanceForDistantExplosion = ini.ReadFloat("MAIN", "Distant explosion distance", 100.0f);
 
-	//Log("Version: %s", version.c_str());
 	Log("Compiling date and time %s @ %s", __DATE__, __TIME__);
-	//if (version != NewVersion) 
-	//{
-	//	Log("Warning: You have a older version of EarShot, your current one '%s', you need to have '%s'! Please update the plugin!", version.c_str(), NewVersion.c_str());
-	//}
 	// Init OpenAL
 	Log("Initializing OpenAL...");
 	pDevice = nullptr;
@@ -179,6 +178,7 @@ void CAudioManager::Shutdown()
 	DeleteAllBuffers(g_Buffers);
 	registeredweapons.clear();
 	weaponNames.clear();
+	UnloadManualAmbiences();
 	Log("Freeing buffers and sources complete.");
 
 	Log("Closing OpenAL device and context...");
@@ -661,7 +661,7 @@ bool CAudioManager::findWeapon(eWeaponType* weapontype, eModelID modelid, std::s
 	fs::path path;
 	if (it == registeredweapons.end())
 	{
-		Log("registeredweapons == end");
+	//	Log("registeredweapons == end");
 		return false;
 	}
 	// if we don't want to play any audio, just check for file's existence instead
@@ -673,7 +673,9 @@ bool CAudioManager::findWeapon(eWeaponType* weapontype, eModelID modelid, std::s
 	return it->second.audioPlay(filename, audioentity);
 }
 
-bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire, bool isThunder, bool isInteriorAmbience)
+bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire, bool isThunder, 
+	bool isInteriorAmbience, bool isManual, float manualMaxDist, 
+	float manualRefDist, float manualRollOff)
 {
 	if (buffer == 0 || CCutsceneMgr::ms_running || FrontEndMenuManager.m_bMenuActive /*|| (isGunfire && CWeather::WeatherRegion != WEATHER_REGION_LA)*/) // Don't play during a cutscene or when paused
 		return false;
@@ -682,14 +684,28 @@ bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, boo
 	CVector pos = GetRandomAmbiencePosition(origin, isThunder, isInteriorAmbience);
 
 	float VolumeToUse = AEAudioHardware.m_fEffectMasterScalingFactor * 1.3f;
+	float refDist = 1.0f;
 	if (isGunfire) {
 		VolumeToUse = AEAudioHardware.m_fEffectMasterScalingFactor * 1.0f;
 	}
 	else if (isThunder) {
 		VolumeToUse = AEAudioHardware.m_fEffectMasterScalingFactor * 1.5f;
 	}
-	if (AudioManager.PlaySource(buffer, 250.0f, VolumeToUse, 1.0f, isThunder ? 6.0f : (isInteriorAmbience ? 15.0f : 5.5f), 1.0f, pitch, pos,
-		false, nullptr, 0, nullptr, nullptr, false, nullptr, "", false, nullptr, eWeaponType(0), isGunfire, isInteriorAmbience, false, false, 0, true))
+
+	if (isThunder) {
+		refDist = 6.0f;
+	}
+	else if (isInteriorAmbience) {
+		refDist = 15.0f;
+	}
+	else if (isManual) {
+		refDist = manualRefDist;
+	}
+	else {
+		refDist = 5.5f;
+	}
+	if (AudioManager.PlaySource(buffer, isManual ? manualMaxDist : 250.0f, VolumeToUse, 1.0f, refDist, isManual ? manualRollOff : 1.0f, pitch, pos,
+		false, nullptr, 0, nullptr, nullptr, false, nullptr, std::string(), false, nullptr, eWeaponType(0), isGunfire, isInteriorAmbience, false, false, 0, true))
 	{
 		Log("PlayAmbienceBuffer returned true");
 		return true;
@@ -887,8 +903,86 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 		else if (CGame::currArea <= 0) {
 			CZone* zone{};
 			CTheZones::GetZoneInfo(&cameraposition, &zone);
-
+			// Manual map ambiences
 			bool playedSomething = false; // track if any ambience actually played
+
+			for (auto& ma : g_ManualAmbiences) {
+				if (!ma.loop) continue;
+				// if there's an active instance, stop it when player left sphere
+				bool hasInstance = (ma.loopingInstance != nullptr);
+				if (hasInstance) {
+					CVector playerPos = FindPlayerCoors();
+					bool inside = IsPointWithinSphere(ma.sphere, playerPos);
+					if (!inside) {
+						AudioManager.StopLoopingAmbience(ma);
+					}
+				}
+			}
+
+			if (!ambienceStillPlaying) {
+
+				for (auto& ma : g_ManualAmbiences) {
+					if (ma.buffer.empty()) continue;
+
+					bool isNightLocal = CClock::ms_nGameClockHours >= 20 || CClock::ms_nGameClockHours < 6;
+					bool isRiotLocal = CGameLogic::LaRiotsActiveHere();
+					if (ma.time == EAmbienceTime::Night && !isNightLocal) {
+						continue;
+					}
+					if (ma.time == EAmbienceTime::Riot && !isRiotLocal) {
+						continue;
+					}
+					CVector playerPos = FindPlayerCoors();
+
+					bool insideRange = IsPointWithinSphere(ma.sphere, playerPos);
+					RandomUnique id(ma.buffer.size());
+
+					int idx = id.next();
+					ALuint buff = ma.buffer[idx];
+					// Handle looping ambiences
+					if (ma.loop) {
+						bool hasInstance = (ma.loopingInstance != nullptr);
+
+						if (insideRange) {
+							if (!hasInstance) {
+								if (AudioManager.StartLoopingAmbience(ma)) {
+									Log("ManualAmbience: started looping (buffer=%u).", buff);
+									playedSomething = true;
+									return true;
+								}
+								else {
+									Log("ManualAmbience: StartLoopingAmbience failed for buffer=%u", buff);
+									continue; // try other ambiences
+								}
+							}
+							else {
+								playedSomething = true;
+								return true;
+							}
+						}
+						continue;
+					}
+
+					// Process non-looping (random) manual ambiences
+					if (!ma.loop && CTimer::m_snTimeInMilliseconds >= ma.nextPlayTime) {
+						if (insideRange) {
+							if (PlayAmbienceBuffer(buff, ma.pos, false, false, false, true, ma.maxDist, ma.refDist, ma.rollOff)) {
+								ma.nextPlayTime = CTimer::m_snTimeInMilliseconds + ma.delay + (CGeneral::GetRandomNumber() % ma.delay);
+								Log("ManualAmbience: played transient buffer=%u, size=%d", buff, ma.buffer.size());
+								playedSomething = true;
+								return true;
+							}
+							else {
+								Log("ManualAmbience: PlayAmbienceBuffer returned false for buffer=%u", buff);
+							}
+						}
+						else {
+							ma.nextPlayTime = 0;
+						}
+					}
+				}
+			}
+
 			bool zoneHasCustomAmbience = false;
 			if (zone) {
 				std::string zoneKey(zone->m_szTextKey);
@@ -962,7 +1056,7 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 			}
 
 			// --- Fallback riot/day/night/fire ambiences ---
-			if (!ambienceStillPlaying && !zoneHasCustomAmbience && !playedSomething) {
+			if (!ambienceStillPlaying && !zoneHasCustomAmbience && (!playedSomething)) {
 				//	Log("Fallback playedSomething is false");
 				bool fireAmbiencePlaying = std::any_of(AudioManager.audiosplaying.begin(), AudioManager.audiosplaying.end(), [&](const std::shared_ptr<SoundInstance>& sfx) {
 					if (!sfx->isAmbience || sfx->isGunfireAmbience) return false;
@@ -1007,6 +1101,110 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 }
 
 
+void CAudioManager::UnloadManualAmbiences()
+{
+	for (auto& ma : g_ManualAmbiences) {
+		if (ma.loopingInstance) {
+			AudioManager.StopLoopingAmbience(ma);
+		}
+
+		if (!ma.buffer.empty()) {
+			RandomUnique id(ma.buffer.size());
+
+			int idx = id.next();
+			ALuint buff = ma.buffer[idx];
+			alDeleteBuffers(1, &buff);
+			buff = 0;
+		}
+		ma.nextPlayTime = 0;
+		ma.loopingInstance = nullptr;
+	}
+	g_ManualAmbiences.clear();
+}
+
+
+// Create and play an OpenAL source for looping ambience.
+// Returns true on success and sets ma.loopingSource to the created source.
+bool CAudioManager::StartLoopingAmbience(ManualAmbience& ma)
+{
+	if (ma.buffer.empty()) return false;
+	if (ma.loopingInstance) return true; // already running
+
+	// prepare an outInst to receive the created instance from PlaySource
+	std::shared_ptr<SoundInstance> inst;
+	RandomUnique id(ma.buffer.size());
+
+	int idx = id.next();
+	ALuint buff = ma.buffer[idx];
+	float gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+
+	bool ok = PlaySource(
+		buff,
+		ma.range,
+		gain,
+		1.0f,
+		1.0f,
+		1.0f,
+		pitch,
+		ma.pos,
+		false,
+		nullptr,
+		0,
+		&inst,
+		nullptr,
+		false,
+		nullptr,
+		std::string(),
+		false,
+		nullptr,
+		eWeaponType(0),
+		false,
+		false,
+		false,
+		true,
+		0,
+		true,
+		nullptr
+	);
+
+	if (!ok || !inst) {
+		Log("StartLoopingAmbience: PlaySource failed for buffer %u", ma.buffer);
+		return false;
+	}
+
+	// store the instance so we can stop it later
+	ma.loopingInstance = inst;
+
+	Log("Started looping ambience via PlaySource (instance) for buffer %u at (%.1f, %.1f, %.1f), R=%.1f",
+		ma.buffer, ma.pos.x, ma.pos.y, ma.pos.z, ma.range);
+	return true;
+}
+
+void CAudioManager::StopLoopingAmbience(ManualAmbience& ma)
+{
+	if (!ma.loopingInstance) return;
+
+	// Try to pause/stop using AudioManager's PauseSource (existing code used this pattern).
+	auto inst = ma.loopingInstance;
+	if (inst) {
+		PauseSource(&*inst);
+		if (inst != nullptr) {
+			ALint state = 0;
+			alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
+			if (state == AL_PLAYING || state == AL_PAUSED) {
+				// already paused above; ensure stopped
+				alSourceStop(inst->source);
+			}
+			alDeleteSources(1, &inst->source);
+			inst->source = 0;
+		}
+	}
+
+	ma.loopingInstance = nullptr;
+	Log("Stopped looping ambience instance");
+}
+
 void CAudioManager::PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapontype, bool spinning, bool playSpinEndSFX)
 {
 	//if (!shooter || !ent) return;
@@ -1022,7 +1220,7 @@ void CAudioManager::PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapont
 		// Start playing if not already
 		if (barrelSpinSource == 0) {
 			if (AudioManager.PlaySource(barrelSpinBuffer, FLT_MAX, AEAudioHardware.m_fEffectMasterScalingFactor, 1.0f, 1.0f, 1.0f, pitch, entity->GetPosition(), false, nullptr, 0, &instance, entity,
-				false, nullptr, "", true, entity, weaponType, false, false, false, true))
+				false, nullptr, std::string(), true, entity, weaponType, false, false, false, true))
 			{
 				barrelSpinSource = instance->source;
 				Log("Playing spin = true");

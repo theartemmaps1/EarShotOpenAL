@@ -2,8 +2,12 @@
 <img width="3840" height="2160" alt="image" src="https://github.com/user-attachments/assets/ec4eff43-c193-401a-bdd6-f062d089736d" />
 
 # EarShotOpenAL
-Fork of the original mod by HzanRsxa2959, which aims to improve &amp; fix the original mod.
+Fork of the original mod by HzanRsxa2959, which aims to improve and fix the original mod.
+
+                                       ---======= EarShot revamp by wuzimu7171_ aka TheArtemMaps =======---
 									
+									
+
 Hi there! I really suggest you to read it all, so you'd fully understand how to add new sounds to your SA build! ( If didn't, not my problem :) )
 
 
@@ -223,6 +227,12 @@ Info about the interiors can be found here: https://docs.sannybuilder.com/scm-do
 
 The "country", "LS", "LV" and "SF" folder that can be created in the "zones" folder are the global zones ambiences.
 It means if you want some ambiences to play on the entire zone and not "piece-by-piece" then add ambiences to those global zones.
+
+OR, if you want to put ambiences manually on the map, do this:
+
+Place the "map_ambience.ini" file in the "GameFolder\generic\ambience" folder.
+
+Instructions are inside that .ini file.
 
 Possible output: GameFolder\EarShot\generic\ambience\ambience.wav (generic ambience during daytime).
 Night time: GameFolder\EarShot\generic\ambience\ambience_night.wav (generic ambience during night time).
