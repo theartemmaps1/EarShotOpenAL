@@ -9,9 +9,17 @@ void Loaders::LoadTankCannonSounds(const fs::path& folder) {
 	while (true) {
 		bool loadedSomething = false;
 
-		fs::path firePath = folder / ("Tank Cannon/cannon_fire" + std::to_string(index) + ".wav");
-		if (fs::exists(firePath)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(firePath.string().c_str());
+		fs::path foundFile;
+		for (const auto& ext : extensions) {
+			fs::path firePath = folder / ("Tank Cannon/cannon_fire" + std::to_string(index) + ext);
+			if (fs::exists(firePath)) {
+				foundFile = firePath;
+				break;
+			}
+		}
+
+		if (!foundFile.empty()) {
+			ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
 			if (buffer != 0) {
 				g_Buffers.tankCannonFireBuffers.push_back(buffer);
 				loadedSomething = true;
@@ -25,11 +33,38 @@ void Loaders::LoadTankCannonSounds(const fs::path& folder) {
 	}
 
 	if (g_Buffers.tankCannonFireBuffers.empty()) {
-		fs::path fallbackPath = folder / "Tank Cannon/cannon_fire.wav";
-		if (fs::exists(fallbackPath)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallbackPath.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.tankCannonFireBuffers.push_back(buffer);
+		for (const auto& ext : extensions) {
+			fs::path fallbackPath = folder / ("Tank Cannon/cannon_fire" + ext);
+			if (fs::exists(fallbackPath)) {
+				ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(fallbackPath.string().c_str());
+				if (buffer != 0) g_Buffers.tankCannonFireBuffers.push_back(buffer);
+				break;
+			}
+		}
+	}
+}
+
+void Loaders::LoadMinigunBarrelSpinSound(const fs::path& folder)
+{
+	auto weapontype = eWeaponType();
+
+	for (auto& directoryentry : fs::recursive_directory_iterator(folder)) {
+		const auto& entrypath = directoryentry.path();
+		if (!fs::is_directory(entrypath)) {
+			std::string filename = entrypath.stem().string();
+			if (nameType(&filename, &weapontype)) {
+				fs::path foundSpin;
+				for (const auto& ext : extensions) {
+					fs::path spinPath = entrypath.parent_path() / ("spin" + ext);
+					if (fs::exists(spinPath)) {
+						foundSpin = spinPath;
+						break;
+					}
+				}
+				if (!foundSpin.empty()) {
+					barrelSpinBuffer = AudioManager.CreateOpenALBufferFromAudioFile(foundSpin.string().c_str());
+					break;
+				}
 			}
 		}
 	}
@@ -57,24 +92,31 @@ void Loaders::LoadBulletWhizzSounds(const fs::path& folder) {
 	for (auto& entry : entries) {
 		int index = 0;
 		while (true) {
-			fs::path path = folder / ("generic/bullet_whizz/" + entry.name + std::to_string(index) + ".wav");
-			if (!fs::exists(path)) break;
+			fs::path foundFile;
+			for (const auto& ext : extensions) {
+				fs::path candidate = folder / ("generic/bullet_whizz/" + entry.name + std::to_string(index) + ext);
+				if (fs::exists(candidate)) {
+					foundFile = candidate;
+					break;
+				}
+			}
+			if (foundFile.empty()) break;
 
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(path.string().c_str());
+			ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
 			if (buffer != 0) {
 				entry.buffer->push_back(buffer);
 			}
-
 			++index;
 		}
 
 		// Fallback: single sound without index
 		if (entry.buffer->empty()) {
-			fs::path fallback = folder / ("generic/bullet_whizz/" + entry.name + ".wav");
-			if (fs::exists(fallback)) {
-				ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-				if (buffer != 0) {
-					entry.buffer->push_back(buffer);
+			for (const auto& ext : extensions) {
+				fs::path fallback = folder / ("generic/bullet_whizz/" + entry.name + ext);
+				if (fs::exists(fallback)) {
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(fallback.string().c_str());
+					if (buffer != 0) entry.buffer->push_back(buffer);
+					break;
 				}
 			}
 		}
@@ -103,45 +145,48 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 		}
 		return false;
 		};
+
 	if (loadOldAmbience) {
 		fs::path zoneDir = ambientDir / "zones";
 		if (fs::exists(zoneDir) && fs::is_directory(zoneDir)) {
-			// iterate only in the local zones folder
 			for (const auto& zoneEntry : fs::directory_iterator(zoneDir)) {
-				if (!zoneEntry.is_directory())
-					continue;
+				if (!zoneEntry.is_directory()) continue;
+				if (isGlobalZoneFolder(zoneEntry.path())) continue;
 
-				if (isGlobalZoneFolder(zoneEntry.path())) {
-					continue; // skip global zones
-				}
 				std::string zoneName = zoneEntry.path().filename().string();
 				std::transform(zoneName.begin(), zoneName.end(), zoneName.begin(), ::tolower);
 
 				// iterate files inside that zone folder
 				for (const auto& entry : fs::directory_iterator(zoneEntry.path())) {
-					if (!entry.is_regular_file())
-						continue;
+					if (!entry.is_regular_file()) continue;
 
 					std::string filename = entry.path().filename().string();
 					const std::string prefix = "ambience";
-					const std::string suffix = ".wav";
 
-					if (filename.rfind(prefix, 0) != 0 || filename.length() <= prefix.length() + suffix.length())
-						continue;
+					bool matchesExtension = false;
+					std::string suffix;
+					for (const auto& ext : extensions) {
+						if (filename.rfind(prefix, 0) == 0 && filename.size() > prefix.size() + ext.size() &&
+							filename.compare(filename.size() - ext.size(), ext.size(), ext) == 0) {
+							matchesExtension = true;
+							suffix = ext;
+							break;
+						}
+					}
+					if (!matchesExtension) continue;
 
-					// strip prefix + suffix
-					std::string name = filename.substr(prefix.length(), filename.length() - prefix.length() - suffix.length());
+					std::string name = filename.substr(prefix.size(), filename.size() - prefix.size() - suffix.size());
 
 					std::string timeSuffix;
 					std::string digits;
 
 					if (name.rfind("_night") == 0) {
 						timeSuffix = "_night";
-						digits = name.substr(6); // after "_night"
+						digits = name.substr(6);
 					}
 					else if (name.rfind("_riot") == 0) {
 						timeSuffix = "_riot";
-						digits = name.substr(5); // after "_riot"
+						digits = name.substr(5);
 					}
 					else {
 						digits = name;
@@ -152,17 +197,11 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 						continue;
 					}
 
-					ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(entry.path().string().c_str());
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(entry.path().string().c_str());
 					if (buffer) {
-						if (timeSuffix == "_night") {
-							g_Buffers.ZoneAmbienceBuffers_Night[zoneName].push_back(buffer);
-						}
-						else if (timeSuffix == "_riot") {
-							g_Buffers.ZoneAmbienceBuffers_Riot[zoneName].push_back(buffer);
-						}
-						else {
-							g_Buffers.ZoneAmbienceBuffers_Day[zoneName].push_back(buffer);
-						}
+						if (timeSuffix == "_night") g_Buffers.ZoneAmbienceBuffers_Night[zoneName].push_back(buffer);
+						else if (timeSuffix == "_riot") g_Buffers.ZoneAmbienceBuffers_Riot[zoneName].push_back(buffer);
+						else g_Buffers.ZoneAmbienceBuffers_Day[zoneName].push_back(buffer);
 
 						Log("Loaded ambience for zone: '%s' (%s) [index=%s] --> %s",
 							zoneName.c_str(),
@@ -174,37 +213,33 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 			}
 		}
 
-
 		for (const auto& region : globalRegions) {
 			fs::path regionDir = ambientDir / "zones" / region;
-			Log("global zones dir: %s", regionDir.string().c_str());
-			if (!fs::exists(regionDir) || !fs::is_directory(regionDir)) {
-				Log("Global zones ambience: folder '%s' wasn't found, ignoring...", regionDir.string().c_str());
-				continue;
-			}
+			if (!fs::exists(regionDir) || !fs::is_directory(regionDir)) continue;
 
 			for (const auto& entry : fs::directory_iterator(regionDir)) {
-				if (!entry.is_regular_file()) {
-					Log("Nah");
-					continue;
-				}
-				Log("global zones entry: %s", entry.path().string().c_str());
+				if (!entry.is_regular_file()) continue;
+
 				std::string filename = entry.path().filename().string();
 				const std::string prefix = "ambience";
-				const std::string suffix = ".wav";
 
-				if (filename.rfind(prefix, 0) != 0 || filename.length() <= prefix.length() + 1)
-					continue;
+				bool matchesExtension = false;
+				std::string suffix;
+				for (const auto& ext : extensions) {
+					if (filename.rfind(prefix, 0) == 0 && filename.size() > prefix.size() + ext.size() &&
+						filename.compare(filename.size() - ext.size(), ext.size(), ext) == 0) {
+						matchesExtension = true;
+						suffix = ext;
+						break;
+					}
+				}
+				if (!matchesExtension) continue;
 
-				std::string name = filename.substr(prefix.length(), filename.length() - prefix.length() - suffix.length());
+				std::string name = filename.substr(prefix.size(), filename.size() - prefix.size() - suffix.size());
 
-				// Extract zone name
-				// Remove trailing digits first
 				std::string nameWithoutDigits = name;
-				while (!nameWithoutDigits.empty() && isdigit(nameWithoutDigits.back()))
-					nameWithoutDigits.pop_back();
+				while (!nameWithoutDigits.empty() && isdigit(nameWithoutDigits.back())) nameWithoutDigits.pop_back();
 
-				// Then check for _night / _riot at the end
 				std::string timeSuffix;
 				if (nameWithoutDigits.size() >= 6 && nameWithoutDigits.compare(nameWithoutDigits.size() - 6, 6, "_night") == 0) {
 					timeSuffix = "_night";
@@ -216,27 +251,15 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 				}
 
 				std::string zoneName = nameWithoutDigits;
-
-				while (!zoneName.empty() && isdigit(zoneName.back())) {
-					zoneName.pop_back();
-				}
-
+				while (!zoneName.empty() && isdigit(zoneName.back())) zoneName.pop_back();
 				std::transform(zoneName.begin(), zoneName.end(), zoneName.begin(), ::tolower);
+				std::string globalKey = region;
 
-				// Prefix region to zoneName so LS/downtown and SF/downtown dont collide
-				std::string globalKey = region/* + "_" + zoneName*/;
-
-				ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(entry.path().string().c_str());
+				ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(entry.path().string().c_str());
 				if (buffer) {
-					if (timeSuffix == "_night") {
-						g_Buffers.GlobalZoneAmbienceBuffers_Night[globalKey].push_back(buffer);
-					}
-					else if (timeSuffix == "_riot") {
-						g_Buffers.GlobalZoneAmbienceBuffers_Riot[globalKey].push_back(buffer);
-					}
-					else {
-						g_Buffers.GlobalZoneAmbienceBuffers_Day[globalKey].push_back(buffer);
-					}
+					if (timeSuffix == "_night") g_Buffers.GlobalZoneAmbienceBuffers_Night[globalKey].push_back(buffer);
+					else if (timeSuffix == "_riot") g_Buffers.GlobalZoneAmbienceBuffers_Riot[globalKey].push_back(buffer);
+					else g_Buffers.GlobalZoneAmbienceBuffers_Day[globalKey].push_back(buffer);
 
 					Log("Loaded ambience for global zone: '%s' (%s) --> %s", globalKey.c_str(), timeSuffix.empty() ? "day" : timeSuffix.c_str(), filename.c_str());
 				}
@@ -244,132 +267,88 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 		}
 
 		for (int i = 0; i <= 300; ++i) {
-			// Existing
-			std::string dayFile = "ambience" + std::to_string(i) + ".wav";
-			std::string nightFile = "ambience_night" + std::to_string(i) + ".wav";
-			std::string riotFile = "ambience_riot" + std::to_string(i) + ".wav";
-			std::string thunderFile = "thunder" + std::to_string(i) + ".wav";
+			for (const auto& ext : extensions) {
+				fs::path dayPath = ambientDir / ("ambience" + std::to_string(i) + ext);
+				fs::path nightPath = ambientDir / ("ambience_night" + std::to_string(i) + ext);
+				fs::path riotPath = ambientDir / ("ambience_riot" + std::to_string(i) + ext);
+				fs::path thunderPath = ambientDir / ("thunder" + std::to_string(i) + ext);
 
-			fs::path dayPath = ambientDir / dayFile;
-			fs::path nightPath = ambientDir / nightFile;
-			fs::path riotPath = ambientDir / riotFile;
-			fs::path thunderPath = ambientDir / thunderFile;
-
-			if (fs::exists(dayPath)) {
-				ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(dayPath.string().c_str());
-				if (buffer) g_Buffers.AmbienceBuffs.push_back(buffer);
-			}
-
-			if (fs::exists(nightPath)) {
-				ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(nightPath.string().c_str());
-				if (buffer) g_Buffers.NightAmbienceBuffs.push_back(buffer);
-			}
-
-			if (fs::exists(riotPath)) {
-				ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(riotPath.string().c_str());
-				if (buffer) g_Buffers.RiotAmbienceBuffs.push_back(buffer);
-			}
-			if (fs::exists(thunderPath))
-			{
-				ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(thunderPath.string().c_str());
-				if (buffer) g_Buffers.ThunderBuffs.push_back(buffer);
+				if (fs::exists(dayPath)) {
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(dayPath.string().c_str());
+					if (buffer) g_Buffers.AmbienceBuffs.push_back(buffer);
+				}
+				if (fs::exists(nightPath)) {
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(nightPath.string().c_str());
+					if (buffer) g_Buffers.NightAmbienceBuffs.push_back(buffer);
+				}
+				if (fs::exists(riotPath)) {
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(riotPath.string().c_str());
+					if (buffer) g_Buffers.RiotAmbienceBuffs.push_back(buffer);
+				}
+				if (fs::exists(thunderPath)) {
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(thunderPath.string().c_str());
+					if (buffer) g_Buffers.ThunderBuffs.push_back(buffer);
+				}
 			}
 		}
 	}
-	// singular
-	if (g_Buffers.AmbienceBuffs.empty()) {
-		fs::path fallback = ambientDir / "ambience.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer)g_Buffers.AmbienceBuffs.push_back(buffer);
+
+	// singular fallbacks
+	for (const auto& ext : extensions) {
+		if (g_Buffers.AmbienceBuffs.empty()) {
+			fs::path fallback = ambientDir / ("ambience" + ext);
+			if (fs::exists(fallback)) g_Buffers.AmbienceBuffs.push_back(AudioManager.CreateOpenALBufferFromAudioFile(fallback.string().c_str()));
+		}
+		if (g_Buffers.NightAmbienceBuffs.empty()) {
+			fs::path fallback = ambientDir / ("ambience_night" + ext);
+			if (fs::exists(fallback)) g_Buffers.NightAmbienceBuffs.push_back(AudioManager.CreateOpenALBufferFromAudioFile(fallback.string().c_str()));
+		}
+		if (g_Buffers.RiotAmbienceBuffs.empty()) {
+			fs::path fallback = ambientDir / ("ambience_riot" + ext);
+			if (fs::exists(fallback)) g_Buffers.RiotAmbienceBuffs.push_back(AudioManager.CreateOpenALBufferFromAudioFile(fallback.string().c_str()));
+		}
+		if (g_Buffers.ThunderBuffs.empty()) {
+			fs::path fallback = ambientDir / ("thunder" + ext);
+			if (fs::exists(fallback)) g_Buffers.ThunderBuffs.push_back(AudioManager.CreateOpenALBufferFromAudioFile(fallback.string().c_str()));
 		}
 	}
 
-	if (g_Buffers.NightAmbienceBuffs.empty()) {
-		fs::path fallback = ambientDir / "ambience_night.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer) g_Buffers.NightAmbienceBuffs.push_back(buffer);
-		}
-	}
-
-	if (g_Buffers.RiotAmbienceBuffs.empty()) {
-		fs::path fallback = ambientDir / "ambience_riot.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer) g_Buffers.RiotAmbienceBuffs.push_back(buffer);
-		}
-	}
-
-	if (g_Buffers.ThunderBuffs.empty()) {
-		fs::path fallback = ambientDir / "thunder.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer) g_Buffers.ThunderBuffs.push_back(buffer);
-		}
-	}
-	// Load interior ambience sounds
+	// Interior ambience
 	fs::path interiorDir = ambientDir / "interiors";
 	if (fs::exists(interiorDir) && fs::is_directory(interiorDir)) {
 		for (const auto& interiorEntry : fs::directory_iterator(interiorDir)) {
-			if (!interiorEntry.is_directory())
-				continue;
-
-			// try to find interior ID folder
+			if (!interiorEntry.is_directory()) continue;
 			std::string interiorIDStr = interiorEntry.path().filename().string();
 			int interiorID = 0;
-			try {
-				interiorID = std::stoi(interiorIDStr);
-			}
-			catch (...) {
-				Log("Invalid interior folder name (not a number): %s", interiorIDStr.c_str());
-				continue;
-			}
+			try { interiorID = std::stoi(interiorIDStr); }
+			catch (...) { Log("Invalid interior folder name (not a number): %s", interiorIDStr.c_str()); continue; }
 
-			// Iterate over each GXT folder inside the interior folder
 			for (const auto& nameEntry : fs::directory_iterator(interiorEntry.path())) {
-				if (!nameEntry.is_directory())
-					continue;
-
+				if (!nameEntry.is_directory()) continue;
 				std::string gxtKey = nameEntry.path().filename().string();
 				std::transform(gxtKey.begin(), gxtKey.end(), gxtKey.begin(), ::tolower);
 
-				// Try numbered ambience files inside the GXT folder
 				for (int i = 0; i <= 300; ++i) {
-					auto wavEntry = nameEntry.path() / ("ambience" + std::to_string(i) + ".wav");
-					auto wavEntryNoIndex = nameEntry.path() / "ambience.wav";
-
-					if (fs::exists(wavEntry)) {
-						ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(wavEntry.string().c_str());
-						if (!buffer) {
-							Log("Failed to load WAV: %s", wavEntry.string().c_str());
-							continue;
-						}
-
-						InteriorAmbience sound;
-						sound.gxtKey = gxtKey;
-						sound.buffer = buffer;
-
-						g_InteriorAmbience[interiorID].push_back(sound);
-
-						Log("Loaded interior sound for interior ID %d, GXT entry '%s': %s",
-							interiorID, gxtKey.c_str(), wavEntry.filename().string().c_str());
+					fs::path Entry, EntryNoIndex;
+					for (const auto& ext : extensions) {
+						Entry = nameEntry.path() / ("ambience" + std::to_string(i) + ext);
+						EntryNoIndex = nameEntry.path() / ("ambience" + ext);
+						if (fs::exists(Entry) || fs::exists(EntryNoIndex)) break;
 					}
-					else if (i == 0 && fs::exists(wavEntryNoIndex)) { // only check this once per folder
-						ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(wavEntryNoIndex.string().c_str());
-						if (!buffer) {
-							Log("Failed to load WAV: %s", wavEntryNoIndex.string().c_str());
-							continue;
-						}
 
-						InteriorAmbience sound;
-						sound.gxtKey = gxtKey;
-						sound.buffer = buffer;
-
+					if (fs::exists(Entry)) {
+						ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(Entry.string().c_str());
+						if (!buffer) { Log("Failed to load : %s", Entry.string().c_str()); continue; }
+						InteriorAmbience sound{ gxtKey, buffer };
 						g_InteriorAmbience[interiorID].push_back(sound);
-
-						Log("Loaded singular interior sound for interior ID %d, GXT entry '%s': %s",
-							interiorID, gxtKey.c_str(), wavEntryNoIndex.filename().string().c_str());
+						Log("Loaded interior sound for interior ID %d, GXT entry '%s': %s", interiorID, gxtKey.c_str(), Entry.filename().string().c_str());
+					}
+					else if (i == 0 && fs::exists(EntryNoIndex)) {
+						ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(EntryNoIndex.string().c_str());
+						if (!buffer) { Log("Failed to load audio file for interior ambience: %s", EntryNoIndex.string().c_str()); continue; }
+						InteriorAmbience sound{ gxtKey, buffer };
+						g_InteriorAmbience[interiorID].push_back(sound);
+						Log("Loaded singular interior sound for interior ID %d, GXT entry '%s': %s", interiorID, gxtKey.c_str(), EntryNoIndex.filename().string().c_str());
 						break;
 					}
 				}
@@ -383,43 +362,44 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 	// those two below is for LS gun ambience
 	fs::path pathToGunfireAmbience = foldermod / "generic" / "ambience" / "gunfire";
 	std::vector<std::string> expectedWeapons = { "ak47", "pistol" };
-
 	for (auto& weapon : expectedWeapons) {
 		fs::path folderPath = pathToGunfireAmbience / weapon;
-		if (fs::exists(folderPath)) {
-			fs::path wavPath = folderPath / "shoot.wav";
-			if (!fs::exists(wavPath)) {
-				Log("Weapon gunfire ambience folder '%s' missing shoot.wav.", weapon.c_str());
-			}
-			else {
-				auto weapontype = eWeaponType();
-				if (nameType(&weapon, &weapontype)) {
-					weaponNames.push_back({ weapontype, weapon });
-					Log("Found weapon sound folder: %s", weapon.c_str());
-				}
-			}
+		if (!fs::exists(folderPath)) { Log("Weapon gunfire ambience folder '%s' is missing.", weapon.c_str()); continue; }
+
+		fs::path shootFile;
+		for (const auto& ext : extensions) {
+			fs::path candidate = folderPath / ("shoot" + ext);
+			if (fs::exists(candidate)) { shootFile = candidate; break; }
 		}
-		else {
-			Log("Weapon gunfire ambience folder '%s' is missing.", weapon.c_str());
+		if (shootFile.empty()) { Log("Weapon gunfire ambience folder '%s' missing shoot file.", weapon.c_str()); continue; }
+
+		auto weapontype = eWeaponType();
+		if (nameType(&weapon, &weapontype)) {
+			weaponNames.push_back({ weapontype, weapon });
+			Log("Found weapon sound folder: %s", weapon.c_str());
 		}
 	}
 
-
 	for (auto& vec : weaponNames) {
 		auto& folderName = vec.weapName;
-		fs::path weaponPath = ambientDir / "gunfire" / folderName / "shoot.wav";
+		fs::path weaponPath;
+		for (const auto& ext : extensions) {
+			weaponPath = ambientDir / "gunfire" / folderName / ("shoot" + ext);
+			if (fs::exists(weaponPath)) break;
+		}
 		if (fs::exists(weaponPath) && fs::is_directory(weaponPath.parent_path())) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(weaponPath.string().c_str());
+			ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(weaponPath.string().c_str());
 			if (buffer != 0) {
 				g_Buffers.WeaponTypeAmbienceBuffers[vec.weapType] = buffer;
 				Log("Loaded weapon ambience for %s: %s", folderName.c_str(), weaponPath.filename().string().c_str());
 			}
 			else {
-				modMessage("Failed to load weapon ambience WAV: " + weaponPath.string());
+				Log("Failed to load weapon ambience: %s", weaponPath.string());
 			}
 		}
 	}
 }
+
 
 void Loaders::LoadMainWeaponsFolder()
 {
@@ -439,25 +419,6 @@ void Loaders::LoadMainWeaponsFolder()
 		return;
 	}
 	Log("Total registered weapons: %d", registeredtotal);
-}
-
-void Loaders::LoadMinigunBarrelSpinSound(const fs::path& folder)
-{
-	auto weapontype = eWeaponType();
-
-	for (auto& directoryentry : fs::recursive_directory_iterator(folder)) {
-		const auto& entrypath = directoryentry.path();
-		if (!fs::is_directory(entrypath)) {
-			std::string filename = entrypath.stem().string();
-			if (nameType(&filename, &weapontype)) {
-				fs::path spinPath = entrypath.parent_path() / "spin.wav";
-				if (fs::exists(spinPath)) {
-					barrelSpinBuffer = AudioManager.CreateOpenALBufferFromWAV(spinPath.string().c_str());
-					break;
-				}
-			}
-		}
-	}
 }
 
 void Loaders::ReloadAudioFolders()
@@ -508,7 +469,7 @@ void Loaders::ReloadAudioFolders()
 	}
 	AudioManager.audiosplaying.clear();  // Remove all sound instances
 
-	//Delete all loaded WAV buffers
+	//Delete all loaded buffers
 	for (auto& buf : AudioManager.gBufferMap) {
 		if (buf.second != 0) {
 			Log("Freeing buffer for reload %u, name: %s", buf.second, buf.first.c_str());
@@ -543,9 +504,17 @@ void Loaders::LoadMissileSounds(const fs::path& folder) {
 	while (true) {
 		bool loadedSomething = false;
 
-		fs::path missilePath = folder / ("Missiles/missile_flyloop" + std::to_string(index) + ".wav");
-		if (fs::exists(missilePath)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(missilePath.string().c_str());
+		fs::path foundFile;
+		for (const auto& ext : extensions) {
+			fs::path candidate = folder / ("Missiles/missile_flyloop" + std::to_string(index) + ext);
+			if (fs::exists(candidate)) {
+				foundFile = candidate;
+				break;
+			}
+		}
+
+		if (!foundFile.empty()) {
+			ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
 			if (buffer != 0) {
 				g_Buffers.missileSoundBuffers.push_back(buffer);
 				loadedSomething = true;
@@ -560,11 +529,12 @@ void Loaders::LoadMissileSounds(const fs::path& folder) {
 
 	// Fallback to non-indexed file if nothing was loaded
 	if (g_Buffers.missileSoundBuffers.empty()) {
-		fs::path fallbackPath = folder / "Missiles/missile_flyloop.wav";
-		if (fs::exists(fallbackPath)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallbackPath.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.missileSoundBuffers.push_back(buffer);
+		for (const auto& ext : extensions) {
+			fs::path fallbackPath = folder / ("Missiles/missile_flyloop" + ext);
+			if (fs::exists(fallbackPath)) {
+				ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(fallbackPath.string().c_str());
+				if (buffer != 0) g_Buffers.missileSoundBuffers.push_back(buffer);
+				break;
 			}
 		}
 	}
@@ -586,34 +556,36 @@ void Loaders::LoadRicochetSounds(const fs::path& folder) {
 
 		int index = 0;
 		while (true) {
-			fs::path file = folder / ("generic/ricochet/" + surface + "/ricochet" + std::to_string(index) + ".wav");
-			if (!fs::exists(file))
-			{
-				Log("LoadRicochetSounds: %s wasn't found at %s", file.filename().string().c_str(), file.parent_path().string().c_str());
-				break;
+			fs::path foundFile;
+			for (const auto& ext : extensions) {
+				fs::path candidate = folder / ("generic/ricochet/" + surface + "/ricochet" + std::to_string(index) + ext);
+				if (fs::exists(candidate)) {
+					foundFile = candidate;
+					break;
+				}
 			}
+			if (foundFile.empty()) break;
 
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(file.string().c_str());
-			if (buffer != 0)
-				buffers.push_back(buffer);
+			ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
+			if (buffer != 0) buffers.push_back(buffer);
 
 			++index;
 		}
 
-		fs::path fileNoIndex = folder / ("generic/ricochet/" + surface + "/ricochet" + ".wav");
-		if (!buffers.empty()) {
-			Log("Loaded %d ricochet sound(s) for surface: %s", (int)buffers.size(), surface.c_str());
-		}
-		else
-		{
-			if (fs::exists(fileNoIndex)) {
-				ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fileNoIndex.string().c_str());
-
-				if (buffer != 0)
-					buffers.push_back(buffer);
-
-				Log("Loaded ricochet sound for surface: %s", surface.c_str());
+		// fallback to non-indexed file
+		if (buffers.empty()) {
+			for (const auto& ext : extensions) {
+				fs::path fileNoIndex = folder / ("generic/ricochet/" + surface + "/ricochet" + ext);
+				if (fs::exists(fileNoIndex)) {
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(fileNoIndex.string().c_str());
+					if (buffer != 0) buffers.push_back(buffer);
+					Log("Loaded ricochet sound for surface: %s", surface.c_str());
+					break;
+				}
 			}
+		}
+		else {
+			Log("Loaded %d ricochet sound(s) for surface: %s", (int)buffers.size(), surface.c_str());
 		}
 	}
 }
@@ -631,29 +603,42 @@ void Loaders::LoadFootstepSounds(const fs::path& baseFolder) {
 
 		const std::string shoeType = entry.path().filename().string();
 
-		// Check if this is a surface-only folder
-		if (fs::exists(entry.path() / "step0.wav") || fs::exists(entry.path() / "step.wav")) {
-			// This is a surface-only folder
+		bool isSurfaceOnly = false;
+		for (const auto& ext : extensions) {
+			if (fs::exists(entry.path() / ("step0" + ext)) || fs::exists(entry.path() / ("step" + ext))) {
+				isSurfaceOnly = true;
+				break;
+			}
+		}
+		if (isSurfaceOnly) {
 			std::vector<ALuint>& buffers = g_Buffers.footstepSurfaceBuffers[shoeType];
 			int index = 0;
 			while (true) {
-				fs::path stepFile = entry.path() / ("step" + std::to_string(index) + ".wav");
-				if (!fs::exists(stepFile))
-				{
-					Log("LoadFootstepSounds: %s wasn't found at %s", stepFile.filename().string().c_str(), stepFile.parent_path().string().c_str());
-					break;
+				fs::path foundFile;
+				for (const auto& ext : extensions) {
+					fs::path candidate = entry.path() / ("step" + std::to_string(index) + ext);
+					if (fs::exists(candidate)) {
+						foundFile = candidate;
+						break;
+					}
 				}
+				if (foundFile.empty()) break;
 
-				ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(stepFile.string().c_str());
+				ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
 				if (buffer != 0) buffers.push_back(buffer);
 				++index;
 			}
 
-			// fallback to a single file
-			fs::path fallback = entry.path() / "step.wav";
-			if (buffers.empty() && fs::exists(fallback)) {
-				ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-				if (buffer != 0) buffers.push_back(buffer);
+			// fallback to single file
+			if (buffers.empty()) {
+				for (const auto& ext : extensions) {
+					fs::path fallback = entry.path() / ("step" + ext);
+					if (fs::exists(fallback)) {
+						ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(fallback.string().c_str());
+						if (buffer != 0) buffers.push_back(buffer);
+						break;
+					}
+				}
 			}
 
 			if (!buffers.empty()) {
@@ -670,19 +655,31 @@ void Loaders::LoadFootstepSounds(const fs::path& baseFolder) {
 
 				int index = 0;
 				while (true) {
-					fs::path stepFile = surfaceEntry.path() / ("step" + std::to_string(index) + ".wav");
-					if (!fs::exists(stepFile)) break;
+					fs::path foundFile;
+					for (const auto& ext : extensions) {
+						fs::path candidate = surfaceEntry.path() / ("step" + std::to_string(index) + ext);
+						if (fs::exists(candidate)) {
+							foundFile = candidate;
+							break;
+						}
+					}
+					if (foundFile.empty()) break;
 
-					ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(stepFile.string().c_str());
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
 					if (buffer != 0) buffers.push_back(buffer);
 					++index;
 				}
 
-				// fallback to a single file
-				fs::path fallback = surfaceEntry.path() / "step.wav";
-				if (buffers.empty() && fs::exists(fallback)) {
-					ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-					if (buffer != 0) buffers.push_back(buffer);
+				// fallback to single file
+				if (buffers.empty()) {
+					for (const auto& ext : extensions) {
+						fs::path fallback = surfaceEntry.path() / ("step" + ext);
+						if (fs::exists(fallback)) {
+							ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(fallback.string().c_str());
+							if (buffer != 0) buffers.push_back(buffer);
+							break;
+						}
+					}
 				}
 
 				if (!buffers.empty()) {
@@ -710,24 +707,30 @@ void Loaders::LoadExplosionRelatedSounds(const fs::path& folder) {
 		int idx = 0;
 		bool indexedLoaded = false;
 		while (true) {
-			fs::path file = path / (prefix + std::to_string(idx) + ".wav");
-			if (!fs::exists(file)) {
-				break;
+			fs::path foundFile;
+			for (const auto& ext : extensions) {
+				fs::path candidate = path / (prefix + std::to_string(idx) + ext);
+				if (fs::exists(candidate)) {
+					foundFile = candidate;
+					break;
+				}
 			}
-			else {
-				indexedLoaded = true;
-				ALuint buf = AudioManager.CreateOpenALBufferFromWAV(file.string().c_str());
-				if (buf != 0) vec.push_back(buf);
-				++idx;
-			}
+			if (foundFile.empty()) break;
+
+			indexedLoaded = true;
+			ALuint buf = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
+			if (buf != 0) vec.push_back(buf);
+			++idx;
 		}
 		if (!indexedLoaded)
 		{
-			fs::path file = path / (prefix + ".wav");
-			if (fs::exists(file))
-			{
-				ALuint buf = AudioManager.CreateOpenALBufferFromWAV(file.string().c_str());
-				if (buf != 0) vec.push_back(buf);
+			for (const auto& ext : extensions) {
+				fs::path candidate = path / (prefix + ext);
+				if (fs::exists(candidate)) {
+					ALuint buf = AudioManager.CreateOpenALBufferFromAudioFile(candidate.string().c_str());
+					if (buf != 0) vec.push_back(buf);
+					break;
+				}
 			}
 		}
 		};
@@ -738,11 +741,10 @@ void Loaders::LoadExplosionRelatedSounds(const fs::path& folder) {
 		for (auto& entry : fs::directory_iterator(explosionTypesDir)) {
 			if (!fs::is_directory(entry.path())) continue;
 			std::string name = entry.path().filename().string();
-			// try parse integer folder name -> typeID
 			int typeID = -1;
 			try { typeID = std::stoi(name); }
 			catch (...) { continue; }
-			// load explosions (explosion*.wav or explosion.wav)
+
 			auto& mainVec = g_Buffers.ExplosionTypeExplosionBuffers[typeID];
 			loadBuffers(entry.path(), mainVec, "explosion");
 
@@ -759,49 +761,47 @@ void Loaders::LoadExplosionRelatedSounds(const fs::path& folder) {
 	// Load generic explosions as fallback
 	int idx = 0;
 	bool anyIndexedLoaded = false;
+	std::vector<SoundFile> genericFiles = {
+		{ "explosion", g_Buffers.explosionBuffers },
+		{ "debris", g_Buffers.explosionsDebrisBuffers },
+		{ "distant", g_Buffers.explosionDistantBuffers }
+	};
+
 	while (true) {
 		bool loadedSomething = false;
-
-		fs::path explosionFile = folder / ("generic/explosions/explosion" + std::to_string(idx) + ".wav");
-		if (fs::exists(explosionFile)) {
-			g_Buffers.explosionBuffers.push_back(AudioManager.CreateOpenALBufferFromWAV(explosionFile.string().c_str()));
-			loadedSomething = true;
-			anyIndexedLoaded = true;
+		for (auto& file : genericFiles) {
+			fs::path foundFile;
+			for (const auto& ext : extensions) {
+				fs::path candidate = folder / ("generic/explosions/" + file.fileName + std::to_string(idx) + ext);
+				if (fs::exists(candidate)) {
+					foundFile = candidate;
+					break;
+				}
+			}
+			if (!foundFile.empty()) {
+				ALuint buf = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
+				if (buf != 0) file.bufferVec.push_back(buf);
+				loadedSomething = true;
+				anyIndexedLoaded = true;
+			}
 		}
-
-		fs::path debrisFile = folder / ("generic/explosions/debris" + std::to_string(idx) + ".wav");
-		if (fs::exists(debrisFile)) {
-			g_Buffers.explosionsDebrisBuffers.push_back(AudioManager.CreateOpenALBufferFromWAV(debrisFile.string().c_str()));
-			loadedSomething = true;
-			anyIndexedLoaded = true;
-		}
-
-		fs::path distantFile = folder / ("generic/explosions/distant" + std::to_string(idx) + ".wav");
-		if (fs::exists(distantFile)) {
-			g_Buffers.explosionDistantBuffers.push_back(AudioManager.CreateOpenALBufferFromWAV(distantFile.string().c_str()));
-			loadedSomething = true;
-			anyIndexedLoaded = true;
-		}
-
 		if (!loadedSomething) break;
 		++idx;
 	}
 
 	// fallback: try non-indexed if nothing was loaded with indexes
 	if (!anyIndexedLoaded) {
-		fs::path explosionFile = folder / "generic/explosions/explosion.wav";
-		if (fs::exists(explosionFile))
-			g_Buffers.explosionBuffers.push_back(AudioManager.CreateOpenALBufferFromWAV(explosionFile.string().c_str()));
-
-		fs::path debrisFile = folder / "generic/explosions/debris.wav";
-		if (fs::exists(debrisFile))
-			g_Buffers.explosionsDebrisBuffers.push_back(AudioManager.CreateOpenALBufferFromWAV(debrisFile.string().c_str()));
-
-		fs::path distantFile = folder / "generic/explosions/distant.wav";
-		if (fs::exists(distantFile))
-			g_Buffers.explosionDistantBuffers.push_back(AudioManager.CreateOpenALBufferFromWAV(distantFile.string().c_str()));
+		for (auto& file : genericFiles) {
+			for (const auto& ext : extensions) {
+				fs::path candidate = folder / ("generic/explosions/" + file.fileName + ext);
+				if (fs::exists(candidate)) {
+					ALuint buf = AudioManager.CreateOpenALBufferFromAudioFile(candidate.string().c_str());
+					if (buf != 0) file.bufferVec.push_back(buf);
+					break;
+				}
+			}
+		}
 	}
-
 }
 
 
@@ -813,69 +813,36 @@ void Loaders::LoadFireSounds(const fs::path& folder) {
 		return;
 	}
 	int index = 0;
+
 	while (true) {
 		bool loadedSomething = false;
 
-		fs::path pathSmall = folder / ("generic/fire/fire_smallloop" + std::to_string(index) + ".wav");
-		if (fs::exists(pathSmall)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathSmall.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.fireLoopBuffersSmall.push_back(buffer);
-				loadedSomething = true;
-			}
-		}
+		std::vector<SoundFile> filesToLoad = {
+			{ "fire_smallloop", g_Buffers.fireLoopBuffersSmall },
+			{ "fire_mediumloop", g_Buffers.fireLoopBuffersMedium },
+			{ "fire_largeloop", g_Buffers.fireLoopBuffersLarge },
+			{ "fire_carloop", g_Buffers.fireLoopBuffersCar },
+			{ "fire_bikeloop", g_Buffers.fireLoopBuffersBike },
+			{ "fire_flameloop", g_Buffers.fireLoopBuffersFlame },
+			{ "fire_molotovloop", g_Buffers.fireLoopBuffersMolotov }
+		};
 
-		fs::path pathMedium = folder / ("generic/fire/fire_mediumloop" + std::to_string(index) + ".wav");
-		if (fs::exists(pathMedium)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathMedium.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.fireLoopBuffersMedium.push_back(buffer);
-				loadedSomething = true;
+		for (auto& file : filesToLoad) {
+			fs::path foundFile;
+			for (const auto& ext : extensions) {
+				fs::path candidate = folder / ("generic/fire/" + file.fileName + std::to_string(index) + ext);
+				if (fs::exists(candidate)) {
+					foundFile = candidate;
+					break;
+				}
 			}
-		}
 
-		fs::path pathLarge = folder / ("generic/fire/fire_largeloop" + std::to_string(index) + ".wav");
-		if (fs::exists(pathLarge)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathLarge.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.fireLoopBuffersLarge.push_back(buffer);
-				loadedSomething = true;
-			}
-		}
-
-		fs::path pathCar = folder / ("generic/fire/fire_carloop" + std::to_string(index) + ".wav");
-		if (fs::exists(pathCar)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathCar.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.fireLoopBuffersCar.push_back(buffer);
-				loadedSomething = true;
-			}
-		}
-
-		fs::path pathBike = folder / ("generic/fire/fire_bikeloop" + std::to_string(index) + ".wav");
-		if (fs::exists(pathBike)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathBike.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.fireLoopBuffersBike.push_back(buffer);
-				loadedSomething = true;
-			}
-		}
-
-		fs::path pathFlame = folder / ("generic/fire/fire_flameloop" + std::to_string(index) + ".wav");
-		if (fs::exists(pathFlame)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathFlame.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.fireLoopBuffersFlame.push_back(buffer);
-				loadedSomething = true;
-			}
-		}
-
-		fs::path pathMolotov = folder / ("generic/fire/fire_molotovloop" + std::to_string(index) + ".wav");
-		if (fs::exists(pathMolotov)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathMolotov.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.fireLoopBuffersMolotov.push_back(buffer);
-				loadedSomething = true;
+			if (!foundFile.empty()) {
+				ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
+				if (buffer != 0) {
+					file.bufferVec.push_back(buffer);
+					loadedSomething = true;
+				}
 			}
 		}
 
@@ -888,63 +855,29 @@ void Loaders::LoadFireSounds(const fs::path& folder) {
 	// Fallbacks
 	fs::path fallback;
 
-	if (g_Buffers.fireLoopBuffersSmall.empty()) {
-		fallback = folder / "generic/fire/fire_smallloop.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.fireLoopBuffersSmall.push_back(buffer);
-		}
-	}
+	std::vector<SoundFile> fallbacks = {
+		{ "fire_smallloop", g_Buffers.fireLoopBuffersSmall },
+		{ "fire_mediumloop", g_Buffers.fireLoopBuffersMedium },
+		{ "fire_largeloop", g_Buffers.fireLoopBuffersLarge },
+		{ "fire_carloop", g_Buffers.fireLoopBuffersCar },
+		{ "fire_bikeloop", g_Buffers.fireLoopBuffersBike },
+		{ "fire_flameloop", g_Buffers.fireLoopBuffersFlame },
+		{ "fire_molotovloop", g_Buffers.fireLoopBuffersMolotov }
+	};
 
-	if (g_Buffers.fireLoopBuffersMedium.empty()) {
-		fallback = folder / "generic/fire/fire_mediumloop.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.fireLoopBuffersMedium.push_back(buffer);
-		}
-	}
-
-	if (g_Buffers.fireLoopBuffersLarge.empty()) {
-		fallback = folder / "generic/fire/fire_largeloop.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.fireLoopBuffersLarge.push_back(buffer);
-		}
-	}
-
-	if (g_Buffers.fireLoopBuffersCar.empty()) {
-		fallback = folder / "generic/fire/fire_carloop.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.fireLoopBuffersCar.push_back(buffer);
-		}
-	}
-
-	if (g_Buffers.fireLoopBuffersBike.empty()) {
-		fallback = folder / "generic/fire/fire_bikeloop.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.fireLoopBuffersBike.push_back(buffer);
-		}
-	}
-
-	if (g_Buffers.fireLoopBuffersFlame.empty()) {
-		fallback = folder / "generic/fire/fire_flameloop.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.fireLoopBuffersFlame.push_back(buffer);
-		}
-	}
-
-	if (g_Buffers.fireLoopBuffersMolotov.empty()) {
-		fallback = folder / "generic/fire/fire_molotovloop.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.fireLoopBuffersMolotov.push_back(buffer);
+	for (auto& fb : fallbacks) {
+		if (fb.bufferVec.empty()) {
+			for (const auto& ext : extensions) {
+				fallback = folder / ("generic/fire/" + fb.fileName + ext);
+				if (fs::exists(fallback)) {
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(fallback.string().c_str());
+					if (buffer != 0) fb.bufferVec.push_back(buffer);
+					break;
+				}
+			}
 		}
 	}
 }
-
 // Copy paste of the previous func
 void Loaders::LoadJackingRelatedSounds(const fs::path& folder) {
 	const fs::path jackDir = folder / "generic/jacked";
@@ -958,48 +891,30 @@ void Loaders::LoadJackingRelatedSounds(const fs::path& folder) {
 	while (true) {
 		bool loadedSomething = false;
 
-		fs::path pathCar = folder / ("generic/jacked/jack_car" + std::to_string(index) + ".wav");
-		if (fs::exists(pathCar)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathCar.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.carJackBuff.push_back(buffer);
-				loadedSomething = true;
-			}
-		}
+		std::vector<SoundFile> filesToLoad = {
+			{ "jack_car", g_Buffers.carJackBuff },
+			{ "jack_carheadbang", g_Buffers.carJackHeadBangBuff },
+			{ "jack_carkick", g_Buffers.carJackKickBuff },
+			{ "jack_bike", g_Buffers.carJackBikeBuff },
+			{ "jack_bulldozer", g_Buffers.carJackBulldozerBuff }
+		};
 
-		fs::path pathHead = folder / ("generic/jacked/jack_carheadbang" + std::to_string(index) + ".wav");
-		if (fs::exists(pathHead)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathHead.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.carJackHeadBangBuff.push_back(buffer);
-				loadedSomething = true;
+		for (auto& file : filesToLoad) {
+			fs::path foundFile;
+			for (const auto& ext : extensions) {
+				fs::path candidate = folder / ("generic/jacked/" + file.fileName + std::to_string(index) + ext);
+				if (fs::exists(candidate)) {
+					foundFile = candidate;
+					break;
+				}
 			}
-		}
 
-		fs::path pathKick = folder / ("generic/jacked/jack_carkick" + std::to_string(index) + ".wav");
-		if (fs::exists(pathKick)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathKick.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.carJackKickBuff.push_back(buffer);
-				loadedSomething = true;
-			}
-		}
-
-		fs::path pathBike = folder / ("generic/jacked/jack_bike" + std::to_string(index) + ".wav");
-		if (fs::exists(pathBike)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathBike.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.carJackBikeBuff.push_back(buffer);
-				loadedSomething = true;
-			}
-		}
-
-		fs::path pathDozer = folder / ("generic/jacked/jack_bulldozer" + std::to_string(index) + ".wav");
-		if (fs::exists(pathDozer)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(pathDozer.string().c_str());
-			if (buffer != 0) {
-				g_Buffers.carJackBulldozerBuff.push_back(buffer);
-				loadedSomething = true;
+			if (!foundFile.empty()) {
+				ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
+				if (buffer != 0) {
+					file.bufferVec.push_back(buffer);
+					loadedSomething = true;
+				}
 			}
 		}
 
@@ -1012,43 +927,24 @@ void Loaders::LoadJackingRelatedSounds(const fs::path& folder) {
 	// Fallback
 	fs::path fallback;
 
-	if (g_Buffers.carJackBuff.empty()) {
-		fallback = folder / "generic/jacked/jack_car.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.carJackBuff.push_back(buffer);
-		}
-	}
+	std::vector<SoundFile> fallbacks = {
+		{ "jack_car", g_Buffers.carJackBuff },
+		{ "jack_carheadbang", g_Buffers.carJackHeadBangBuff },
+		{ "jack_carkick", g_Buffers.carJackKickBuff },
+		{ "jack_bike", g_Buffers.carJackBikeBuff },
+		{ "jack_bulldozer", g_Buffers.carJackBulldozerBuff }
+	};
 
-	if (g_Buffers.carJackHeadBangBuff.empty()) {
-		fallback = folder / "generic/jacked/jack_carheadbang.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.carJackHeadBangBuff.push_back(buffer);
-		}
-	}
-
-	if (g_Buffers.carJackKickBuff.empty()) {
-		fallback = folder / "generic/jacked/jack_carkick.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.carJackKickBuff.push_back(buffer);
-		}
-	}
-
-	if (g_Buffers.carJackBikeBuff.empty()) {
-		fallback = folder / "generic/jacked/jack_bike.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.carJackBikeBuff.push_back(buffer);
-		}
-	}
-
-	if (g_Buffers.carJackBulldozerBuff.empty()) {
-		fallback = folder / "generic/jacked/jack_bulldozer.wav";
-		if (fs::exists(fallback)) {
-			ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(fallback.string().c_str());
-			if (buffer != 0) g_Buffers.carJackBulldozerBuff.push_back(buffer);
+	for (auto& fb : fallbacks) {
+		if (fb.bufferVec.empty()) {
+			for (const auto& ext : extensions) {
+				fallback = folder / ("generic/jacked/" + fb.fileName + ext);
+				if (fs::exists(fallback)) {
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(fallback.string().c_str());
+					if (buffer != 0) fb.bufferVec.push_back(buffer);
+					break;
+				}
+			}
 		}
 	}
 }

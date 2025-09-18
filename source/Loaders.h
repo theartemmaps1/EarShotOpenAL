@@ -32,6 +32,11 @@ struct WeapInfos
 	std::string weapName;
 };
 
+struct SoundFile {
+	std::string fileName;
+	std::vector<ALuint>& bufferVec;
+};
+
 inline std::unordered_map<int, std::vector<InteriorAmbience>> g_InteriorAmbience;
 inline std::vector<WeapInfos> weaponNames;
 inline auto registeredweapons = map<pair<eWeaponType, eModelID>, AudioStream>();

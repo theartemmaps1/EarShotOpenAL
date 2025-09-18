@@ -10,11 +10,14 @@
 #include "logging.h"
 using namespace std;
 namespace fs = std::filesystem;
-struct WAVData
-{
-	ALenum format;
-	ALsizei freq;
-	std::vector<char> data;
+
+inline const std::vector<std::string> extensions = { ".wav", ".mp3", ".flac", ".ogg" }; // all supported audio extensions
+
+struct AudioData {
+	std::vector<float> samples;
+	unsigned int channels = 0;
+	unsigned int sampleRate = 0;
+	unsigned int bitsPerSample = 0;
 };
 
 // Store audios data
@@ -52,7 +55,7 @@ struct SoundInstance
 	FxSystem_c* fireFX = nullptr;
 	CFire* firePtr = nullptr;
 
-	//SoundInstance() = default;
+	SoundInstance() = default;
 	~SoundInstance() = default;
 };
 
@@ -112,8 +115,11 @@ public:
 		fs::path* path = nullptr, std::string nameBuff = "",
 		bool isMinigunBarrelSpin = false, CPed* shooter = nullptr, eWeaponType weapType = eWeaponType(0), bool isGunfire = false,
 		bool isInteriorAmbience = false, bool isMissile = false, bool looping = false, uint32_t delay = 0, bool isAmbience = false, FxSystem_c* fireFX = nullptr);
-	WAVData LoadWAV(const char* filename);
-	ALuint CreateOpenALBufferFromWAV(const char* filename);
+	AudioData DecodeWAV(const std::string& path);
+	AudioData DecodeMP3(const std::string& path);
+	AudioData DecodeFLAC(const std::string& path);
+	AudioData DecodeOGG(const std::string& path);
+	ALuint CreateOpenALBufferFromAudioFile(const fs::path& path);
 	void AudioPlay(fs::path* audiopath, CPhysical* audioentity);
 	bool findWeapon(eWeaponType* weapontype, eModelID modelid, std::string filename, CPhysical* audioentity, bool playAudio = true);
 	bool PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire = false, bool isThunder = false, bool isInteriorAmbience = false);

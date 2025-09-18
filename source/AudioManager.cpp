@@ -11,6 +11,10 @@
 #include <CEntryExitManager.h>
 #include <CTheZones.h>
 #include <CCutsceneMgr.h>
+#include "vendor/dr_libs/dr_wav.h"
+#include "vendor/dr_libs/dr_flac.h"
+#include "vendor/dr_libs/dr_mp3.h"
+#include <stb_vorbis.c>
 
 CAudioManager AudioManager;
 
@@ -189,112 +193,195 @@ void CAudioManager::Shutdown()
 	initializationstatus = -2;
 }
 
-// We can use this to read WAV files, no external libraries needed
-WAVData CAudioManager::LoadWAV(const char* filename)
+AudioData CAudioManager::DecodeWAV(const std::string& path)
 {
-	std::ifstream file(filename, std::ios::binary);
-	if (!file.is_open()) {
-		Error("Failed to open WAV file: %s", filename);
+	drwav wav;
+	if (!drwav_init_file(&wav, path.c_str(), NULL)) {
+		Log("%s: Failed to init WAV", __FUNCTION__);
+		return {};
 	}
 
-	char chunkId[4];
-	file.read(chunkId, 4);
-	if (std::string(chunkId, 4) != "RIFF") {
-		Error("Not a valid WAV file: %s", filename);
+	drwav_uint64 totalFrames = wav.totalPCMFrameCount;
+	unsigned int channels = wav.channels;
+	unsigned int sampleRate = wav.sampleRate;
+	unsigned int bitsPerSample = wav.bitsPerSample;
+
+	if (totalFrames == 0 || channels == 0) {
+		drwav_uninit(&wav);
+		return {};
 	}
 
-	file.seekg(4, std::ios::cur); // skip chunk size
-
-	char format[4];
-	file.read(format, 4);
-	if (std::string(format, 4) != "WAVE") {
-		Error("Not a valid WAVE file: %s", filename);
+	// check overflow: totalFrames * channels must fit in size_t
+	uint64_t totalSamples64 = totalFrames * (uint64_t)channels;
+	if (totalSamples64 > std::numeric_limits<size_t>::max()) {
+		drwav_uninit(&wav);
+		return {};
 	}
 
-	char subchunk1Id[4];
-	file.read(subchunk1Id, 4);
-	if (std::string(subchunk1Id, 4) != "fmt ") {
-		Error("Invalid fmt chunk in WAV: %s", filename);
+	std::vector<float> buffer;
+	buffer.resize(static_cast<size_t>(totalSamples64));
+
+	drwav_uint64 framesRead = drwav_read_pcm_frames_f32(&wav, totalFrames, buffer.data());
+	drwav_uninit(&wav);
+
+	if (framesRead == 0) {
+		return {};
 	}
 
-	uint32_t subchunk1Size = 0;
-	file.read(reinterpret_cast<char*>(&subchunk1Size), 4);
+	buffer.resize(static_cast<size_t>(framesRead) * channels);
 
-	uint16_t audioFormat = 0;
-	uint16_t numChannels = 0;
-	uint32_t sampleRate = 0;
-	uint32_t byteRate = 0;
-	uint16_t blockAlign = 0;
-	uint16_t bitsPerSample = 0;
+	AudioData out;
+	out.channels = channels;
+	out.sampleRate = sampleRate;
+	out.bitsPerSample = bitsPerSample; // source bits per sample
+	out.samples = std::move(buffer);
 
-	file.read(reinterpret_cast<char*>(&audioFormat), 2);
-	file.read(reinterpret_cast<char*>(&numChannels), 2);
-	file.read(reinterpret_cast<char*>(&sampleRate), 4);
-	file.read(reinterpret_cast<char*>(&byteRate), 4);
-	file.read(reinterpret_cast<char*>(&blockAlign), 2);
-	file.read(reinterpret_cast<char*>(&bitsPerSample), 2);
-
-	/*if (audioFormat != 1) {
-		Error("Only PCM WAV files supported: %s", filename);
-	}*/
-
-	if (subchunk1Size > 16) {
-		file.seekg(subchunk1Size - 16, std::ios::cur);
-	}
-
-	char subchunk2Id[4];
-	uint32_t subchunk2Size = 0;
-	while (true) {
-		file.read(subchunk2Id, 4);
-		file.read(reinterpret_cast<char*>(&subchunk2Size), 4);
-		if (std::string(subchunk2Id, 4) == "data") break;
-		file.seekg(subchunk2Size, std::ios::cur);
-		if (file.eof()) {
-			Error("Data chunk not found in file: %s", filename);
-		}
-	}
-
-	std::vector<char> data(subchunk2Size);
-	file.read(data.data(), subchunk2Size);
-
-	ALenum formatEnum = 0;
-	if (numChannels == 1) {
-		formatEnum = (bitsPerSample == 8) ? AL_FORMAT_MONO8 : AL_FORMAT_MONO16;
-		Log("Loaded MONO %d-bit WAV: %s", bitsPerSample, filename);
-	}
-	else if (numChannels == 2) {
-		formatEnum = (bitsPerSample == 8) ? AL_FORMAT_STEREO8 : AL_FORMAT_STEREO16;
-		Log("Loaded STEREO %d-bit WAV (NO 3D SPATIALIZATION!): %s", bitsPerSample, filename);
-	}
-	else {
-		Error("Only mono or stereo WAV supported: %s", filename);
-	}
-
-	WAVData wav = { formatEnum, static_cast<ALsizei>(sampleRate), std::move(data) };
-	file.close(); // close it when we're done with it
-	return wav;
+	return out;
 }
 
-ALuint CAudioManager::CreateOpenALBufferFromWAV(const char* filename) {
-	std::string fn{ filename };
+AudioData CAudioManager::DecodeMP3(const std::string& path)
+{
+	drmp3_config config{};
+	drmp3_uint64 totalFrames = 0;
+
+	float* pData = drmp3_open_file_and_read_pcm_frames_f32(path.c_str(), &config, &totalFrames, NULL);
+	if (!pData || totalFrames == 0 || config.channels == 0) {
+		if (pData) drmp3_free(pData, NULL);
+		return {};
+	}
+
+	uint64_t totalSamples64 = totalFrames * (uint64_t)config.channels;
+	if (totalSamples64 > std::numeric_limits<size_t>::max()) {
+		drmp3_free(pData, NULL);
+		return {};
+	}
+
+	std::vector<float> buffer;
+	buffer.assign(pData, pData + static_cast<size_t>(totalSamples64));
+	drmp3_free(pData, NULL);
+
+	AudioData out;
+	out.channels = config.channels;
+	out.sampleRate = config.sampleRate;
+	out.bitsPerSample = 32; // decoded as float32
+	out.samples = std::move(buffer);
+
+	return out;
+}
+
+AudioData CAudioManager::DecodeFLAC(const std::string& path)
+{
+	unsigned int channels = 0, sampleRate = 0;
+	drflac_uint64 totalFrames = 0;
+
+	float* pData = drflac_open_file_and_read_pcm_frames_f32(path.c_str(), &channels, &sampleRate, &totalFrames, NULL);
+	if (!pData || totalFrames == 0 || channels == 0) {
+		if (pData) drflac_free(pData, NULL);
+		return {};
+	}
+
+	uint64_t totalSamples64 = totalFrames * (uint64_t)channels;
+	if (totalSamples64 > std::numeric_limits<size_t>::max()) {
+		drflac_free(pData, NULL);
+		return {};
+	}
+
+	std::vector<float> buffer;
+	buffer.assign(pData, pData + static_cast<size_t>(totalSamples64));
+	drflac_free(pData, NULL);
+
+	AudioData out;
+	out.channels = channels;
+	out.sampleRate = sampleRate;
+	out.bitsPerSample = 32;
+	out.samples = std::move(buffer);
+
+	return out;
+}
+
+AudioData CAudioManager::DecodeOGG(const std::string& path)
+{
+	short* decoded = nullptr;
+	int channels = 0, sampleRate = 0;
+
+	int totalSamples = stb_vorbis_decode_filename(path.c_str(), &channels, &sampleRate, &decoded);
+	if (totalSamples <= 0 || !decoded || channels <= 0) {
+		if (decoded) free(decoded);
+		return {};
+	}
+
+	// stb returns total samples across all channels (i.e. frames*channels)
+	std::vector<float> buffer;
+	buffer.resize(static_cast<size_t>(totalSamples));
+
+	// Use clamp and convert. Dividing by 32768 maps [-32768,32767] to [-1, ~0.99997]
+	for (int i = 0; i < totalSamples; ++i) {
+		float v = static_cast<float>(decoded[i]) / 32768.0f;
+		buffer[static_cast<size_t>(i)] = std::clamp(v, -1.0f, 1.0f);
+	}
+
+	free(decoded);
+
+	AudioData out;
+	out.channels = static_cast<unsigned int>(channels);
+	out.sampleRate = static_cast<unsigned int>(sampleRate);
+	out.bitsPerSample = 16;
+	out.samples = std::move(buffer);
+
+	return out;
+}
+
+ALuint CAudioManager::CreateOpenALBufferFromAudioFile(const fs::path& path) {
+	std::string fn{ path.string() };
 
 	// If we already loaded this buffer, return it to prevent overflow
 	auto it = gBufferMap.find(fn);
 	if (it != gBufferMap.end()) {
 		if (alIsBuffer(it->second)) {
-			Log("Buffer already loaded for '%s', returning cached buffer.", filename);
+			Log("Buffer already loaded for '%s', returning cached buffer.", path.string().c_str());
 			return it->second;
 		}
 		else {
-			Log("Found invalid buffer for '%s', erasing cache entry.", filename);
+			Log("Found invalid buffer for '%s', erasing cache entry.", path.string().c_str());
 			gBufferMap.erase(it);
 		}
 	}
-	WAVData data = LoadWAV(fn.c_str());
+	std::string fileExtension = path.extension().string();
+	AudioData data;
+
+	fs::path p = path;
+
+	// Decode possible audio extensions
+	for (const auto& ext : extensions) {
+		p.replace_extension(ext);
+		if (fs::exists(p)) {
+			std::string actualExtension = p.extension().string();
+			if (actualExtension == ".wav") data = DecodeWAV(p.string());
+			else if (actualExtension == ".mp3") data = DecodeMP3(p.string());
+			else if (actualExtension == ".flac") data = DecodeFLAC(p.string());
+			else if (actualExtension == ".ogg") data = DecodeOGG(p.string());
+			break;
+		}
+	}
+
+	ALenum format = 0;
+	if (data.channels == 1) format = AL_FORMAT_MONO_FLOAT32;
+	else if (data.channels == 2) format = AL_FORMAT_STEREO_FLOAT32;
+	else {
+		Log("Unsupported channel count: %u", data.channels);
+		return 0;
+	}
+
+	if (format == AL_FORMAT_MONO_FLOAT32) {
+		Log("CreateOpenALBufferFromAudioFile: Loaded MONO %d-bit audio file %s", data.bitsPerSample, fn.c_str());
+	}
+	else if (format == AL_FORMAT_STEREO_FLOAT32) {
+		Log("CreateOpenALBufferFromAudioFile: Loaded STEREO (!!!NO 3D SPATIALIZATION!!!) %d-bit audio file %s", data.bitsPerSample, fn.c_str());
+	}
 
 	ALuint buff = 0;
 	alGenBuffers(1, &buff);
-	alBufferData(buff, data.format, data.data.data(), (ALsizei)data.data.size(), data.freq);
+	alBufferData(buff, format, data.samples.data(), static_cast<ALsizei>(data.samples.size() * sizeof(float)), data.sampleRate);
 	gBufferMap.emplace(fn, buff);
 	return buff;
 }
@@ -379,12 +466,17 @@ bool CAudioManager::PlaySource(ALuint buff,
 	{
 		inst->name = inst->nameBuffer.c_str();
 	}
-
-	inst->entity = ent;
+	if (ent) 
+	{
+		inst->entity = ent;
+	}
+	if (shooter) 
+	{
+		inst->shooter = shooter;
+	}
 	inst->pos = pos;
 	inst->isPossibleGunFire = isPossibleGunFire;
 	inst->minigunBarrelSpin = isMinigunBarrelSpin;
-	inst->shooter = shooter;
 	inst->WeaponType = weapType;
 	inst->pos = pos;
 	inst->isAmbience = isAmbience;
@@ -409,8 +501,6 @@ bool CAudioManager::PlaySource(ALuint buff,
 	if (isFire) {
 		inst->isFire = isFire;
 		inst->fireFX = fireFX;
-		inst->entity = nullptr;
-		inst->shooter = nullptr;
 		if (firePtr) {
 			inst->firePtr = firePtr;
 			g_Buffers.fireSounds[firePtr] = inst;
@@ -419,8 +509,6 @@ bool CAudioManager::PlaySource(ALuint buff,
 	else if (fireEventID != 0) {
 		inst->isFire = false;
 		inst->firePtr = nullptr;
-		inst->entity = nullptr;
-		inst->shooter = nullptr;
 		g_Buffers.nonFireSounds[fireEventID] = inst;
 	}
 	if (inst)
@@ -489,9 +577,9 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 
 	float dist = DistanceBetweenPoints(cameraposition, pos);
 
-	ALuint buffer = AudioManager.CreateOpenALBufferFromWAV(audiopath->string().c_str());
+	ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(audiopath->string().c_str());
 	if (buffer == 0) {
-		modMessage("Could not play " + outputPath(audiopath));
+		Log("Could not play %s", outputPath(audiopath));
 		return;
 	}
 
@@ -1085,13 +1173,15 @@ bool CAudioManager::SetSourceRolloffFactor(ALuint source, float factor)
 
 bool AudioStream::audioPath(std::string filename, fs::path& outPath)
 {
-	fs::path candidate = audiosfolder / fs::path(filename).replace_extension(".wav");
-	if (fs::exists(candidate)) {
-		auto inst = std::make_shared<SoundInstance>();
-		inst->path = candidate;
-		outPath = std::move(candidate);
-		AudioManager.audiosplaying.push_back(std::move(inst));
-		return true;
+	for (const auto& ext : extensions) {
+		fs::path candidate = audiosfolder / fs::path(filename).replace_extension(ext);
+		if (fs::exists(candidate)) {
+			auto inst = std::make_shared<SoundInstance>();
+			inst->path = candidate;
+			outPath = std::move(candidate);
+			AudioManager.audiosplaying.push_back(std::move(inst));
+			return true;
+		}
 	}
 	return false;
 }
@@ -1101,7 +1191,7 @@ bool AudioStream::audioPlay(std::string filename, CPhysical* audioEntity)
 	std::vector<fs::path> alternatives;
 	const std::string& baseName = filename;
 	CPed* ped = (CPed*)audioEntity;
-	// Alternatives: sound0.wav, sound1.wav, ...
+	// Alternatives: sound0.wav, sound1.ogg, ...
 	for (int i = 0; i < 10; ++i) {
 		std::string altName = baseName + std::to_string(i);
 		fs::path altPath;

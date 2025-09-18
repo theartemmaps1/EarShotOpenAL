@@ -489,16 +489,6 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 	}
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 
-	auto findExistingAudioForFire = [&](CFire* fire) -> std::shared_ptr<SoundInstance> {
-		for (auto& a : AudioManager.audiosplaying) {
-			if (!a || a->entity || a->shooter) continue;
-			if (a->firePtr == fire) {
-				return a;
-			}
-		}
-		return nullptr;
-		};
-
 	auto PlayPositionalSound = [&](int eventId, const std::vector<ALuint>& bufferList, const CVector& position) -> bool {
 		if (bufferList.empty() || CTimer::ms_fTimeScale <= 0.0f) return false;
 
@@ -670,7 +660,6 @@ void UpdateFireSoundCleanup() {
 				if (state == AL_STOPPED && !sound->paused) {
 					alDeleteSources(1, &sound->source);
 					sound->source = 0;
-					sound->~SoundInstance();
 				}
 			}
 			it = g_Buffers.fireSounds.erase(it);
@@ -750,11 +739,11 @@ void __fastcall PlayMinigunBarrelStopSound(CAEWeaponAudioEntity* ts, int, CPed* 
 		if (AudioManager.findWeapon(&weapon, eModelID(-1), "spin_end", ts->m_pPed, false)) {
 			AudioManager.PlayOrStopBarrelSpinSound(ts->m_pPed, &weapon, false, false);
 			//	ts->PlayMiniGunStopSound(ped);
-			Log("PlayMinigunBarrelStopSound: Custom spin_end.wav found, skipping vanilla");
+			Log("PlayMinigunBarrelStopSound: Custom spin_end found, skipping vanilla");
 			return;
 		}
 	}
-	Log("PlayMinigunBarrelStopSound fallback: no custom spin_end.wav, using vanilla");
+	Log("PlayMinigunBarrelStopSound fallback: no custom spin_end, using vanilla");
 	ts->PlayMiniGunStopSound(ped);
 }
 
