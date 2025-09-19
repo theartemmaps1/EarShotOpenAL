@@ -423,6 +423,7 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 				float refDist = ini.ReadFloat(section, "Reference distance", 1.0f);
 				float rollOff = ini.ReadFloat(section, "Roll off factor", 1.0f);
 				bool loop = ini.ReadBoolean(section, "Loop", false);
+				bool allow = ini.ReadBoolean(section, "Allow other ambiences", false);
 				uint32_t delay = (uint32_t)ini.ReadInteger(section, "Delay", 30000);
 				std::string timeStr = ini.ReadString(section, "Time", "any");
 
@@ -474,6 +475,7 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 						ma.refDist = refDist;
 						ma.rollOff = rollOff;
 						ma.maxDist = maxDist;
+						ma.allowOtherAmbiences = allow;
 
 						g_ManualAmbiences.push_back(ma);
 

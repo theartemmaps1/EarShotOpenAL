@@ -675,7 +675,7 @@ bool CAudioManager::findWeapon(eWeaponType* weapontype, eModelID modelid, std::s
 
 bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire, bool isThunder, 
 	bool isInteriorAmbience, bool isManual, float manualMaxDist, 
-	float manualRefDist, float manualRollOff)
+	float manualRefDist, float manualRollOff, ManualAmbience& ma)
 {
 	if (buffer == 0 || CCutsceneMgr::ms_running || FrontEndMenuManager.m_bMenuActive /*|| (isGunfire && CWeather::WeatherRegion != WEATHER_REGION_LA)*/) // Don't play during a cutscene or when paused
 		return false;
@@ -705,7 +705,7 @@ bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, boo
 		refDist = 5.5f;
 	}
 	if (AudioManager.PlaySource(buffer, isManual ? manualMaxDist : 250.0f, VolumeToUse, 1.0f, refDist, isManual ? manualRollOff : 1.0f, pitch, pos,
-		false, nullptr, 0, nullptr, nullptr, false, nullptr, std::string(), false, nullptr, eWeaponType(0), isGunfire, isInteriorAmbience, false, false, 0, true))
+		false, nullptr, 0, nullptr, nullptr, false, nullptr, std::string(), false, nullptr, eWeaponType(0), isGunfire, isInteriorAmbience, false, false, 0, isManual ? !ma.allowOtherAmbiences : true))
 	{
 		Log("PlayAmbienceBuffer returned true");
 		return true;
@@ -719,6 +719,7 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 	static uint32_t lastPrintedInteriorID = 0;
 	bool isNight = CClock::ms_nGameClockHours >= 20 || CClock::ms_nGameClockHours < 6;
 	bool isRiot = CGameLogic::LaRiotsActiveHere();
+	CVector playerPos = FindPlayerCoors();
 	// --- 0) Detect interior->interior switch (warp while staying inside) ---
 	if (prevCurrArea > 0 && CGame::currArea > 0 && prevCurrArea != CGame::currArea) {
 		// We changed interiors while still "inside" -> stop old interior ambience(s) and allow new to play
@@ -808,7 +809,6 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 			int currInterior = CGame::currArea;
 			CEntryExit* currentEntryExit = nullptr;
 			auto* playa = FindPlayerPed();
-			CVector playerPos = FindPlayerCoors();
 
 			float closestDistSq = FLT_MAX;
 
@@ -911,7 +911,6 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 				// if there's an active instance, stop it when player left sphere
 				bool hasInstance = (ma.loopingInstance != nullptr);
 				if (hasInstance) {
-					CVector playerPos = FindPlayerCoors();
 					bool inside = IsPointWithinSphere(ma.sphere, playerPos);
 					if (!inside) {
 						AudioManager.StopLoopingAmbience(ma);
@@ -919,66 +918,85 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 				}
 			}
 
-			if (!ambienceStillPlaying) {
+			// Stop running looping ambiences if player left their sphere
+			for (auto& ma : g_ManualAmbiences) {
+				if (!ma.loop) continue;
+				if (!ma.loopingInstance) continue;
 
-				for (auto& ma : g_ManualAmbiences) {
-					if (ma.buffer.empty()) continue;
+				bool inside = IsPointWithinSphere(ma.sphere, playerPos);
+				if (!inside) {
+					AudioManager.StopLoopingAmbience(ma);
+					Log("ManualAmbience: stopped looping (buffer) - player left range.");
+				}
+			}
 
-					bool isNightLocal = CClock::ms_nGameClockHours >= 20 || CClock::ms_nGameClockHours < 6;
-					bool isRiotLocal = CGameLogic::LaRiotsActiveHere();
-					if (ma.time == EAmbienceTime::Night && !isNightLocal) {
-						continue;
-					}
-					if (ma.time == EAmbienceTime::Riot && !isRiotLocal) {
-						continue;
-					}
-					CVector playerPos = FindPlayerCoors();
+			// Try to play manual ambiences
+			for (auto& ma : g_ManualAmbiences) {
+				if (ma.buffer.empty()) continue;
 
-					bool insideRange = IsPointWithinSphere(ma.sphere, playerPos);
-					RandomUnique id(ma.buffer.size());
+				if (ma.time == EAmbienceTime::Night && !isNight) continue;
+				if (ma.time == EAmbienceTime::Riot && !isRiot) continue;
 
-					int idx = id.next();
-					ALuint buff = ma.buffer[idx];
-					// Handle looping ambiences
-					if (ma.loop) {
-						bool hasInstance = (ma.loopingInstance != nullptr);
+				bool insideRange = IsPointWithinSphere(ma.sphere, playerPos);
 
-						if (insideRange) {
-							if (!hasInstance) {
-								if (AudioManager.StartLoopingAmbience(ma)) {
-									Log("ManualAmbience: started looping (buffer=%u).", buff);
+				// pick a random buffer
+				RandomUnique id(ma.buffer.size());
+				int idx = id.next();
+				ALuint buff = ma.buffer[idx];
+
+				// Handle looping ambiences
+				if (ma.loop) {
+					bool hasInstance = (ma.loopingInstance != nullptr);
+
+					if (insideRange) {
+						// start loop if not already running AND (no other ambience is playing OR this manual allows others)
+						if (!hasInstance && (!ambienceStillPlaying || ma.allowOtherAmbiences)) {
+							if (AudioManager.StartLoopingAmbience(ma)) {
+								Log("ManualAmbience: started looping ambience (buffer=%u).", buff);
+								if (!ma.allowOtherAmbiences) {
 									playedSomething = true;
 									return true;
 								}
-								else {
-									Log("ManualAmbience: StartLoopingAmbience failed for buffer=%u", buff);
-									continue; // try other ambiences
-								}
 							}
 							else {
+								Log("ManualAmbience: StartLoopingAmbience failed for buffer=%u", buff);
+							}
+						}
+						else if (hasInstance) {
+							if (!ma.allowOtherAmbiences) {
 								playedSomething = true;
 								return true;
 							}
 						}
-						continue;
 					}
+					else {
+						if (hasInstance) {
+							AudioManager.StopLoopingAmbience(ma);
+							Log("ManualAmbience: stopped looping ambience (buffer=%u) - player left range.", buff);
+						}
+					}
+					continue; // next manual ambience
+				}
 
-					// Process non-looping (random) manual ambiences
-					if (!ma.loop && CTimer::m_snTimeInMilliseconds >= ma.nextPlayTime) {
-						if (insideRange) {
-							if (PlayAmbienceBuffer(buff, ma.pos, false, false, false, true, ma.maxDist, ma.refDist, ma.rollOff)) {
+				// Handle non-looping ambiences
+				if (!ma.loop && CTimer::m_snTimeInMilliseconds >= ma.nextPlayTime) {
+					if (insideRange) {
+						if (!ambienceStillPlaying || ma.allowOtherAmbiences) {
+							if (PlayAmbienceBuffer(buff, ma.pos, false, false, false, true, ma.maxDist, ma.refDist, ma.rollOff, ma)) {
 								ma.nextPlayTime = CTimer::m_snTimeInMilliseconds + ma.delay + (CGeneral::GetRandomNumber() % ma.delay);
-								Log("ManualAmbience: played transient buffer=%u, size=%d", buff, ma.buffer.size());
-								playedSomething = true;
-								return true;
+								Log("ManualAmbience: played transient buffer=%u, size=%zu", buff, ma.buffer.size());
+								if (!ma.allowOtherAmbiences) {
+									playedSomething = true;
+									return true;
+								}
 							}
 							else {
 								Log("ManualAmbience: PlayAmbienceBuffer returned false for buffer=%u", buff);
 							}
 						}
-						else {
-							ma.nextPlayTime = 0;
-						}
+					}
+					else {
+						ma.nextPlayTime = 0;
 					}
 				}
 			}
@@ -1002,8 +1020,6 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 					}
 				}
 
-				//std::string boolean = ambienceStillPlaying ? "true" : "false";
-				//Log("ambienceStillPlaying: %s", boolean.c_str());
 				// First try local zone ambience
 				if (!zoneKey.empty() && !ambienceStillPlaying && CTimer::m_snTimeInMilliseconds >= nextZoneAmbienceTime) {
 					for (const auto& [key, vec] : buffersMap) {
@@ -1164,7 +1180,7 @@ bool CAudioManager::StartLoopingAmbience(ManualAmbience& ma)
 		false,
 		true,
 		0,
-		true,
+		!ma.allowOtherAmbiences,
 		nullptr
 	);
 

@@ -74,6 +74,7 @@ struct ManualAmbience {
 	float maxDist;
 	float refDist;
 	float rollOff;
+	bool allowOtherAmbiences;
 	ManualAmbience()
 		: pos{ 0.0f,0.0f,0.0f }, range(50.0f), loop(false), loopingInstance(nullptr), time(EAmbienceTime::Any), delay(0), nextPlayTime(0),
 		maxDist(50.0f), refDist(1.0f), rollOff(1.0f)
@@ -151,7 +152,7 @@ public:
 	void AudioPlay(fs::path* audiopath, CPhysical* audioentity);
 	bool findWeapon(eWeaponType* weapontype, eModelID modelid, std::string filename, CPhysical* audioentity, bool playAudio = true);
 	bool PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire = false, bool isThunder = false, bool isInteriorAmbience = false, bool isManual = false, float manualMaxDist = 250.0f,
-	float manualRefDist = 1.0f, float manualRollOff = 1.0f);
+		float manualRefDist = 1.0f, float manualRollOff = 1.0f, ManualAmbience& ma = ManualAmbience());
 	bool PlayAmbienceSFX(const CVector& origin, eWeaponType weaponType, bool useOldAmbience);
 	void PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapontype, bool spinning, bool playSpinEndSFX = false);
 	ALCcontext* GetContext()
