@@ -172,7 +172,7 @@ void CAudioManager::Shutdown()
 	g_Buffers.nonFireSounds.clear();
 
 	// and clear ent vector if it holds CAEFireAudioEntity* references
-	//g_Buffers.ent.clear();
+	g_Buffers.ent.clear();
 
 	// Remove every single OpenAL buffer
 	DeleteAllBuffers(g_Buffers);
