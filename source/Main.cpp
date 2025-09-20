@@ -488,140 +488,209 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 
 }
 
-// Executes every frame internally
 auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, void*, int eventId, CVector* posn) {
 	// Keep track of CAEFireAudioEntity to check FX existence later
 	if (std::find(g_Buffers.ent.begin(), g_Buffers.ent.end(), ts) == g_Buffers.ent.end()) {
 		g_Buffers.ent.push_back(ts);
 	}
+
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 
-	auto PlayPositionalSound = [&](int eventId, const std::vector<ALuint>& bufferList, const CVector& position) -> bool {
-		if (bufferList.empty() || CTimer::ms_fTimeScale <= 0.0f) return false;
-
-		auto it = g_Buffers.nonFireSounds.find(eventId);
-		if (it != g_Buffers.nonFireSounds.end()) {
-			auto inst = it->second.get();
-			if (!inst || inst->source == 0) {
-				// fallthrough to create new
-			}
-			else {
-				alSource3f(inst->source, AL_POSITION, position.x, position.y, position.z);
-				ALint state;
-				alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
-				if (state == AL_PAUSED) {
-					if (inst->paused) {
-						AudioManager.ResumeSource(inst);
-					}
-					else {
-						// mismatch: source reports paused but our flag not set -> play to be safe
-						alSourcePlay(inst->source);
-						inst->paused = false;
-					}
-				}
-				else if (state == AL_STOPPED) {
-					alSourcePlay(inst->source);
-				}
-				return true;
-			}
-		}
-
-		// Pick random buffer and play (fallback)
-		RandomUnique rnd(bufferList.size());
-		int idx = rnd.next();
-		ALuint buffer = bufferList[idx];
-		if (buffer == 0) return false;
-
-		// Create a new non-fire sound (AudioManager.PlaySource will insert into nonFireSounds)
-		if (AudioManager.PlaySource(buffer, 200.0f, AEAudioHardware.m_fEffectMasterScalingFactor, 4.0f,
-			1.0f, 1.5f, pitch, position, false, nullptr, eventId, nullptr, nullptr,
-			false, nullptr, std::string(), false, nullptr, WEAPONTYPE_UNARMED,
-			false, false, false, true))
-		{
-			return true;
-		}
-		return false;
+	auto GetSourceState = [&](ALuint src) -> int {
+		if (src == 0) return -1;
+		ALint state = 0;
+		alGetSourcei(src, AL_SOURCE_STATE, &state);
+		return state;
 		};
 
-	auto PlayFireLoopSound = [&](CFire* fire, const std::vector<ALuint>& bufferList) -> bool {
-		if (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise || CTimer::ms_fTimeScale <= 0.0f || bufferList.empty()) return false;
+	auto SafeDeleteInstanceSource = [&](std::shared_ptr<SoundInstance> inst) {
+		if (!inst) return;
+		if (inst->source != 0) {
+			alDeleteSources(1, &inst->source);
+			inst->source = 0;
+		}
 
-		auto it = g_Buffers.fireSounds.find(fire);
-		CVector pos = fire->m_vecPosition;
+		inst->entity = nullptr;
+		inst->shooter = nullptr;
+		inst->firePtr = nullptr;
+		inst->paused = false;
+		inst->isFire = false;
+		};
 
-		// If there is a mapping, use it, but treat AL_PAUSED specially
-		if (it != g_Buffers.fireSounds.end()) {
-			auto inst = it->second.get();
-			if (inst && inst->isFire && inst->source != 0) {
-				alSource3f(inst->source, AL_POSITION, pos.x, pos.y, pos.z);
-				ALint state;
-				alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
+	auto EnsureNonFireInstanceValid = [&](int evt) -> bool {
+		auto it = g_Buffers.nonFireSounds.find(evt);
+		if (it == g_Buffers.nonFireSounds.end()) return false;
 
-				if (state == AL_PAUSED) {
-					if (inst->paused) {
-						// resume via proper handler so pauseOffset is respected
-						AudioManager.ResumeSource(inst);
-					}
-					else {
-						// if our paused flag is false but AL reports PAUSED, try to play (defensive)
-						alSourcePlay(inst->source);
-						inst->paused = false;
-					}
-				}
-				else if (state == AL_STOPPED) {
-					// only actually start if it's stopped
-					alSourcePlay(inst->source);
-					inst->paused = false;
-				}
-				// if state == AL_PLAYING -> nothing to do
-				return true;
-			}
+		auto inst = it->second;
+		if (!inst) { g_Buffers.nonFireSounds.erase(it); return false; }
+
+		int state = GetSourceState(inst->source);
+		if (state == AL_STOPPED || state == -1) {
+			SafeDeleteInstanceSource(inst);
+			g_Buffers.nonFireSounds.erase(it);
 			return false;
 		}
 
-		// create a new looping fire sound
-		RandomUnique rnd(bufferList.size());
-		int idx = rnd.next();
-		ALuint buffer = bufferList[idx];
-		if (buffer == 0) return false;
+		return true;
+		};
 
-		if (AudioManager.PlaySource(buffer, 200.0f, AEAudioHardware.m_fEffectMasterScalingFactor /* fire->m_fStrength*/, 4.0f,
-			1.0f, 1.5f, pitch, pos, true, fire, 0, nullptr, nullptr, false, nullptr, std::string(), false, nullptr))
-		{
-			return true;
+	auto GetOrCleanupFireInstance = [&](CFire* fire) -> std::shared_ptr<SoundInstance> {
+		auto it = g_Buffers.fireSounds.find(fire);
+		if (it == g_Buffers.fireSounds.end()) return nullptr;
+
+		auto inst = it->second;
+		if (!inst) { g_Buffers.fireSounds.erase(it); return nullptr; }
+
+		if (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise) {
+			SafeDeleteInstanceSource(inst);
+			g_Buffers.fireSounds.erase(it);
+			return nullptr;
 		}
-		return false;
+
+		int state = GetSourceState(inst->source);
+		if (state == AL_STOPPED || state == -1) {
+			SafeDeleteInstanceSource(inst);
+			g_Buffers.fireSounds.erase(it);
+			return nullptr;
+		}
+
+		
+		if (inst->entity || inst->shooter) {
+			inst->entity = nullptr;
+			inst->shooter = nullptr;
+		}
+
+		return inst;
+		};
+
+	auto PlayOrUpdatePositional = [&](int evt, const std::vector<ALuint>& buffers, const CVector& position) -> bool {
+		if (buffers.empty() || CTimer::ms_fTimeScale <= 0.0f) return false;
+
+		if (EnsureNonFireInstanceValid(evt)) {
+			auto inst = g_Buffers.nonFireSounds[evt];
+			if (inst && inst->source != 0) {
+				alSource3f(inst->source, AL_POSITION, position.x, position.y, position.z);
+
+				int state = GetSourceState(inst->source);
+				if (state == AL_PAUSED) {
+					if (inst->paused) {
+						AudioManager.ResumeSource(inst.get());
+					}
+					else {
+						alSourcePlay(inst->source);
+						inst->paused = false;
+					}
+				}
+				else if (state == AL_STOPPED) {
+					alSourcePlay(inst->source);
+				}
+				return true;
+			}
+		}
+
+		RandomUnique rnd(buffers.size());
+		ALuint buf = buffers[rnd.next()];
+		if (buf == 0) return false;
+
+		bool ok = AudioManager.PlaySource(buf, 200.0f, AEAudioHardware.m_fEffectMasterScalingFactor, 4.0f,
+			1.0f, 1.5f, pitch, position, false, nullptr, evt, nullptr, nullptr,
+			false, nullptr, std::string(), false, nullptr, WEAPONTYPE_UNARMED,
+			false, false, false, true);
+
+		return ok;
+		};
+
+	auto PlayOrUpdateFireLoop = [&](CFire* fire, const std::vector<ALuint>& buffers) -> bool {
+		if (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise || CTimer::ms_fTimeScale <= 0.0f || buffers.empty()) return false;
+
+		CVector pos = fire->m_vecPosition;
+		auto inst = GetOrCleanupFireInstance(fire);
+		if (inst) {
+			if (inst->source != 0) {
+				alSource3f(inst->source, AL_POSITION, pos.x, pos.y, pos.z);
+				int state = GetSourceState(inst->source);
+
+				if (state == AL_PAUSED) {
+					if (inst->paused) AudioManager.ResumeSource(inst.get());
+					else {
+						alSourcePlay(inst->source);
+						inst->paused = false;
+					}
+				}
+				else if (state == AL_STOPPED) {
+					alSourcePlay(inst->source);
+					inst->paused = false;
+				}
+				return true;
+			}
+		}
+
+		RandomUnique rnd(buffers.size());
+		ALuint buf = buffers[rnd.next()];
+		if (buf == 0) return false;
+
+		bool ok = AudioManager.PlaySource(buf, 200.0f, AEAudioHardware.m_fEffectMasterScalingFactor, 4.0f,
+			1.0f, 1.5f, pitch, pos, true, fire, 0, nullptr, nullptr, false, nullptr, std::string(), false, nullptr);
+		if (ok) {
+			auto it = g_Buffers.fireSounds.find(fire);
+			if (it != g_Buffers.fireSounds.end()) {
+				auto newInst = it->second;
+				if (newInst) {
+					newInst->entity = nullptr;
+					newInst->shooter = nullptr;
+					newInst->isFire = true;
+				}
+			}
+		}
+		return ok;
 		};
 
 	bool handled = false;
-	// Handle special non-CFire (particle-only) events early
+
 	if (posn) {
 		switch (eventId) {
-		case AE_FIRE_CAR:  handled |= PlayPositionalSound(AE_FIRE_CAR, g_Buffers.fireLoopBuffersCar, *posn); break;
-		case AE_FIRE_BIKE: handled |= PlayPositionalSound(AE_FIRE_BIKE, g_Buffers.fireLoopBuffersBike, *posn); break;
-		case AE_FIRE_FLAME: handled |= PlayPositionalSound(AE_FIRE_FLAME, g_Buffers.fireLoopBuffersFlame, *posn); break;
-		case AE_FIRE_MOLOTOV_FLAME: handled |= PlayPositionalSound(AE_FIRE_MOLOTOV_FLAME, g_Buffers.fireLoopBuffersMolotov, *posn); break;
-		}
-	}
-
-	for (int i = 0; i < MAX_NUM_FIRES; i++) {
-		CFire* fire = &gFireManager.m_aFires[i];
-		if (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise || CTimer::ms_fTimeScale <= 0.0f) continue;
-
-		switch (eventId) {
-		case AE_FIRE:
-			handled |= PlayFireLoopSound(fire, g_Buffers.fireLoopBuffersSmall);
+		case AE_FIRE_CAR:
+			handled |= PlayOrUpdatePositional(AE_FIRE_CAR, g_Buffers.fireLoopBuffersCar, *posn);
 			break;
-		case AE_FIRE_MEDIUM:
-			handled |= PlayFireLoopSound(fire, g_Buffers.fireLoopBuffersMedium);
+		case AE_FIRE_BIKE:
+			handled |= PlayOrUpdatePositional(AE_FIRE_BIKE, g_Buffers.fireLoopBuffersBike, *posn);
 			break;
-		case AE_FIRE_LARGE:
-			handled |= PlayFireLoopSound(fire, g_Buffers.fireLoopBuffersLarge);
+		case AE_FIRE_FLAME:
+			handled |= PlayOrUpdatePositional(AE_FIRE_FLAME, g_Buffers.fireLoopBuffersFlame, *posn);
+			break;
+		case AE_FIRE_MOLOTOV_FLAME:
+			handled |= PlayOrUpdatePositional(AE_FIRE_MOLOTOV_FLAME, g_Buffers.fireLoopBuffersMolotov, *posn);
 			break;
 		default: break;
 		}
 	}
 
+	for (int i = 0; i < MAX_NUM_FIRES; i++) {
+		CFire* fire = &gFireManager.m_aFires[i];
+		if (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise) {
+			auto it = g_Buffers.fireSounds.find(fire);
+			if (it != g_Buffers.fireSounds.end()) {
+				SafeDeleteInstanceSource(it->second);
+				g_Buffers.fireSounds.erase(it);
+			}
+			continue;
+		}
+
+		switch (eventId) {
+		case AE_FIRE:
+			handled |= PlayOrUpdateFireLoop(fire, g_Buffers.fireLoopBuffersSmall);
+			break;
+		case AE_FIRE_MEDIUM:
+			handled |= PlayOrUpdateFireLoop(fire, g_Buffers.fireLoopBuffersMedium);
+			break;
+		case AE_FIRE_LARGE:
+			handled |= PlayOrUpdateFireLoop(fire, g_Buffers.fireLoopBuffersLarge);
+			break;
+		default: break;
+		}
+	}
+
+	// Nothing worked out, call OG
 	if (!handled) {
 		subhook_remove(subhookCAEFireAudioEntity__AddAudioEvent);
 		plugin::CallMethod<0x4DD3C0, CAEFireAudioEntity*, int, CVector*>(ts, eventId, posn);
@@ -629,102 +698,6 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 	}
 }
 
-void UpdateFireSoundCleanup() {
-
-	// Clean up non-fire sounds tied to inactive CAEFireAudioEntity
-	for (auto it = g_Buffers.ent.begin(); it != g_Buffers.ent.end();) {
-		CAEFireAudioEntity* entity = *it;
-		if (entity && entity->field_84) {
-			++it;
-			continue;
-		}
-
-		for (auto nsIt = g_Buffers.nonFireSounds.begin(); nsIt != g_Buffers.nonFireSounds.end();) {
-			auto inst = nsIt->second.get();
-			if (inst) {
-				alSourceStop(inst->source);
-				ALint state;
-				alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
-				if (state == AL_STOPPED && !inst->paused) {
-					alDeleteSources(1, &inst->source);
-				}
-			}
-			nsIt = g_Buffers.nonFireSounds.erase(nsIt);
-		}
-
-		it = g_Buffers.ent.erase(it);
-	}
-
-	// Update and clean up fire loop sounds
-	for (auto it = g_Buffers.fireSounds.begin(); it != g_Buffers.fireSounds.end();) {
-		CFire* fire = it->first;
-		auto sound = it->second.get();
-		if (!fire->m_nFlags.bActive) {
-			if (sound) {
-				alSourceStop(sound->source);
-				ALint state;
-				alGetSourcei(sound->source, AL_SOURCE_STATE, &state);
-				if (state == AL_STOPPED && !sound->paused) {
-					alDeleteSources(1, &sound->source);
-					sound->source = 0;
-				}
-			}
-			it = g_Buffers.fireSounds.erase(it);
-			continue;
-		}
-
-		if (sound && (!sound->entity && !sound->shooter)) {
-			CVector pos = fire->m_vecPosition;
-			alSource3f(sound->source, AL_POSITION, pos.x, pos.y, pos.z);
-			ALint state;
-			alGetSourcei(sound->source, AL_SOURCE_STATE, &state);
-			if (state == AL_STOPPED && !sound->paused) {
-				alSourcePlay(sound->source);
-
-				auto sfx = std::make_shared<SoundInstance>();
-				sfx->source = sound->source;
-				sfx->entity = nullptr;
-				sfx->isFire = true;
-				sfx->firePtr = fire;
-				sfx->isAmbience = false;
-				sfx->isGunfireAmbience = false;
-				sfx->isInteriorAmbience = false;
-				sfx->shooter = nullptr;
-				sfx->pos = pos;
-				bool already = false;
-				for (auto& a : AudioManager.audiosplaying) if (a->source == sound->source) { already = true; break; }
-				if (!already) AudioManager.audiosplaying.push_back(std::move(sfx));
-				break;
-			}
-		}
-
-		++it;
-	}
-
-	// Play and update volume of non-fire sounds
-	for (auto& [eventId, sound] : g_Buffers.nonFireSounds) {
-		if (!sound || sound->entity || sound->shooter) continue;
-
-		ALint state;
-		alGetSourcei(sound->source, AL_SOURCE_STATE, &state);
-		if (state == AL_STOPPED && !sound->paused) {
-			alSourcePlay(sound->source);
-
-			auto sfx = std::make_shared<SoundInstance>();
-			sfx->source = sound->source;
-			sfx->entity = nullptr;
-			sfx->isFire = false;
-			sfx->firePtr = nullptr;
-			sfx->isAmbience = false;
-			sfx->isGunfireAmbience = false;
-			sfx->isInteriorAmbience = false;
-			bool already = false;
-			for (auto& a : AudioManager.audiosplaying) if (a->source == sound->source) { already = true; break; }
-			if (!already) AudioManager.audiosplaying.push_back(std::move(sfx));
-			break;
-		}
-	}
-}
 
 // Forgive my retarded method, but at least it works just how i wanted it to :(
 void __fastcall PlayMinigunBarrelStopSound(CAEWeaponAudioEntity* ts, int, CPed* ped)
@@ -1105,6 +1078,7 @@ void __fastcall CAudioEngine__ReportFrontEndAudioHooked(CAudioEngine* eng, int, 
 	eng->ReportFrontendAudioEvent(eventId, volumeChange, speed);
 	subhook_install(subhookCAudioEngine__ReportFrontEndAudioEvent);
 }
+
 class EarShot {
 public:
 	EarShot() {
@@ -1152,7 +1126,7 @@ public:
 				// Don't update any fire sound if the game is paused
 				if (!FrontEndMenuManager.m_bMenuActive)
 				{
-					UpdateFireSoundCleanup();
+					AudioManager.UpdateFireSoundCleanup();
 					// Play the ambience when it's not rainy and the screen didn't fade out yet
 					if (CWeather::Rain <= 0.0f && TheCamera.GetScreenFadeStatus() == 0)
 					{
@@ -1286,68 +1260,63 @@ public:
 						[&](const std::shared_ptr<SoundInstance>& inst) {
 							ALint state;
 							alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
-
-							// Update missile sound position and velocity
-							if (!inst->isFire && state == AL_PLAYING) 
-							{
-							if (inst->entity && IsEntityPointerValid(inst->entity) && inst->missileSource != 0 && inst->source == inst->missileSource) {
-								alSource3f(inst->missileSource, AL_POSITION,
-									inst->entity->GetPosition().x,
-									inst->entity->GetPosition().y,
-									inst->entity->GetPosition().z);
-								alSource3f(inst->missileSource, AL_VELOCITY,
-									inst->entity->m_vecMoveSpeed.x,
-									inst->entity->m_vecMoveSpeed.y,
-									inst->entity->m_vecMoveSpeed.z);
-
-								CVector direction = inst->entity->GetForward();
-								alSourcef(inst->missileSource, AL_CONE_INNER_ANGLE, 60.0f);
-								alSourcef(inst->missileSource, AL_CONE_OUTER_ANGLE, 180.0f);
-								alSourcef(inst->missileSource, AL_CONE_OUTER_GAIN, 0.3f);
-								alSource3f(inst->missileSource, AL_DIRECTION, direction.x, direction.y, direction.z);
-
-							}
-							
-								if (inst->entity && IsEntityPointerValid(inst->entity)) {
-									alSource3f(inst->source, AL_POSITION,
-										inst->entity->GetPosition().x,
-										inst->entity->GetPosition().y,
-										inst->entity->GetPosition().z);
-									alSource3f(inst->source, AL_VELOCITY,
-										inst->entity->m_vecMoveSpeed.x,
-										inst->entity->m_vecMoveSpeed.y,
-										inst->entity->m_vecMoveSpeed.z);
-									CVector direction = inst->entity->GetForward();
-									alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
-								}
-								else if (inst->shooter && IsEntityPointerValid(inst->shooter))
+								// Update missile sound position and velocity
+								if (!inst->isFire && (!inst->firePtr || !inst->fireFX) && state == AL_PLAYING)
 								{
-									alSource3f(inst->source, AL_POSITION,
-										inst->shooter->GetPosition().x,
-										inst->shooter->GetPosition().y,
-										inst->shooter->GetPosition().z);
-									alSource3f(inst->source, AL_VELOCITY,
-										inst->shooter->m_vecMoveSpeed.x,
-										inst->shooter->m_vecMoveSpeed.y,
-										inst->shooter->m_vecMoveSpeed.z);
-									CVector direction = inst->shooter->GetForward();
-									alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
+									if (inst->entity && IsEntityPointerValid(inst->entity) && inst->bIsMissile && inst->missileSource != 0 && inst->source == inst->missileSource) {
+										alSource3f(inst->missileSource, AL_POSITION,
+											inst->entity->GetPosition().x,
+											inst->entity->GetPosition().y,
+											inst->entity->GetPosition().z);
+										alSource3f(inst->missileSource, AL_VELOCITY,
+											inst->entity->m_vecMoveSpeed.x,
+											inst->entity->m_vecMoveSpeed.y,
+											inst->entity->m_vecMoveSpeed.z);
+
+										CVector direction = inst->entity->GetForward();
+										alSourcef(inst->missileSource, AL_CONE_INNER_ANGLE, 60.0f);
+										alSourcef(inst->missileSource, AL_CONE_OUTER_ANGLE, 180.0f);
+										alSourcef(inst->missileSource, AL_CONE_OUTER_GAIN, 0.3f);
+										alSource3f(inst->missileSource, AL_DIRECTION, direction.x, direction.y, direction.z);
+
+									}
+
+									if (inst->entity && IsEntityPointerValid(inst->entity)) {
+										alSource3f(inst->source, AL_POSITION,
+											inst->entity->GetPosition().x,
+											inst->entity->GetPosition().y,
+											inst->entity->GetPosition().z);
+										alSource3f(inst->source, AL_VELOCITY,
+											inst->entity->m_vecMoveSpeed.x,
+											inst->entity->m_vecMoveSpeed.y,
+											inst->entity->m_vecMoveSpeed.z);
+										CVector direction = inst->entity->GetForward();
+										alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
+									}
+									else if (inst->shooter && IsPedPointerValid(inst->shooter))
+									{
+										alSource3f(inst->source, AL_POSITION,
+											inst->shooter->GetPosition().x,
+											inst->shooter->GetPosition().y,
+											inst->shooter->GetPosition().z);
+										alSource3f(inst->source, AL_VELOCITY,
+											inst->shooter->m_vecMoveSpeed.x,
+											inst->shooter->m_vecMoveSpeed.y,
+											inst->shooter->m_vecMoveSpeed.z);
+										CVector direction = inst->shooter->GetForward();
+										alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
+									}
 								}
-							}
-							if (inst->shooter && inst->minigunBarrelSpin && inst->source != 0)
-							{
-								alSource3f(inst->source, AL_POSITION, inst->shooter->GetPosition().x, inst->shooter->GetPosition().y, inst->shooter->GetPosition().z);
-							}
-							if (inst->isFire && inst->entity) {
-								Log("WARN: fire instance has non-null entity %p (name=%s, source=%u)", inst->entity, inst->nameBuffer.c_str(), inst->source);
-							}
+								if (inst->shooter && inst->minigunBarrelSpin && inst->source != 0)
+								{
+									alSource3f(inst->source, AL_POSITION, inst->shooter->GetPosition().x, inst->shooter->GetPosition().y, inst->shooter->GetPosition().z);
+								}
 
 							// To prevent overflow, we erase any sources that are no longer used
 							if (state != AL_PLAYING && state != AL_PAUSED) {
 								//Log("Removed source '%d'", inst->source);
 								alDeleteSources(1, &inst->source);
 								inst->source = 0;
-								inst->~SoundInstance();
 								return true;
 							}
 							return false;
@@ -1370,6 +1339,7 @@ public:
 				nextInteriorAmbienceTime = 0;
 				nextZoneAmbienceTime = 0;
 				nextFireAmbienceTime = 0;
+				//AudioManager.UnloadManualAmbiences();
 				for (auto& inst : AudioManager.audiosplaying)
 				{
 					if (inst->isAmbience) {
@@ -1448,7 +1418,7 @@ public:
 // So that plugin can use the context from here resulting in compatibility.
 // Trust me, if it was a .exe this wouldn't have been here.
 // Hope that clears it up.
-extern "C" __declspec(dllexport) ALCcontext * GetContext()
+extern "C" __declspec(dllexport) ALCcontext* GetContext()
 {
 	return AudioManager.GetContext();
 }

@@ -47,6 +47,7 @@ struct SoundInstance
 	bool isAmbience = false;
 	bool isGunfireAmbience = false;
 	bool isInteriorAmbience = false;
+	bool isManualAmbience = false;
 	eWeaponType WeaponType;
 	CPed* shooter = nullptr;
 	ALenum spinningstatus;
@@ -149,6 +150,7 @@ public:
 	AudioData DecodeFLAC(const std::string& path);
 	AudioData DecodeOGG(const std::string& path);
 	ALuint CreateOpenALBufferFromAudioFile(const fs::path& path);
+	void UpdateFireSoundCleanup();
 	void AudioPlay(fs::path* audiopath, CPhysical* audioentity);
 	bool findWeapon(eWeaponType* weapontype, eModelID modelid, std::string filename, CPhysical* audioentity, bool playAudio = true);
 	bool PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire = false, bool isThunder = false, bool isInteriorAmbience = false, bool isManual = false, float manualMaxDist = 250.0f,

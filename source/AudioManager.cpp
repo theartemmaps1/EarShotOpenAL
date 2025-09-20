@@ -172,7 +172,7 @@ void CAudioManager::Shutdown()
 	g_Buffers.nonFireSounds.clear();
 
 	// and clear ent vector if it holds CAEFireAudioEntity* references
-	g_Buffers.ent.clear();
+	//g_Buffers.ent.clear();
 
 	// Remove every single OpenAL buffer
 	DeleteAllBuffers(g_Buffers);
@@ -388,7 +388,7 @@ ALuint CAudioManager::CreateOpenALBufferFromAudioFile(const fs::path& path) {
 
 // To avoid constant OpenAL blocks, we use this func for everything.
 // Used to play 3D sounds in a 3D space.
-// For 2D sounds we use the other func called "playBuffer2D".
+// For 2D sounds we use the other func called "PlaySource2D".
 // Note that this plays the sound only ONCE and looping is only done for missiles/fire/minigun barrel here and managed separately.
 // @returns true on success, false otherwise.
 bool CAudioManager::PlaySource(ALuint buff,
@@ -466,11 +466,11 @@ bool CAudioManager::PlaySource(ALuint buff,
 	{
 		inst->name = inst->nameBuffer.c_str();
 	}
-	if (ent) 
+	if (ent && !isFire)
 	{
 		inst->entity = ent;
 	}
-	if (shooter) 
+	if (shooter && !isFire) 
 	{
 		inst->shooter = shooter;
 	}
@@ -492,12 +492,9 @@ bool CAudioManager::PlaySource(ALuint buff,
 
 	if (!inst->path.empty() && !inst->nameBuffer.empty() && inst->name)
 	{
-		Log("playBuffer: path: %s, nameBuffer: %s, name: %s", inst->path.string().c_str(), inst->nameBuffer.c_str(), inst->name);
+		Log("%s: path: %s, nameBuffer: %s, name: %s", __FUNCTION__, inst->path.string().c_str(), inst->nameBuffer.c_str(), inst->name);
 	}
-	if (outInst)
-	{
-		*outInst = inst;
-	}
+
 	if (isFire) {
 		inst->isFire = isFire;
 		inst->fireFX = fireFX;
@@ -507,10 +504,16 @@ bool CAudioManager::PlaySource(ALuint buff,
 		}
 	}
 	else if (fireEventID != 0) {
-		inst->isFire = false;
+		inst->fireFX = fireFX;
 		inst->firePtr = nullptr;
 		g_Buffers.nonFireSounds[fireEventID] = inst;
 	}
+
+	if (outInst)
+	{
+		*outInst = inst;
+	}
+
 	if (inst)
 	{
 		audiosplaying.push_back(std::move(inst));
@@ -673,16 +676,16 @@ bool CAudioManager::findWeapon(eWeaponType* weapontype, eModelID modelid, std::s
 	return it->second.audioPlay(filename, audioentity);
 }
 
-bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire, bool isThunder, 
-	bool isInteriorAmbience, bool isManual, float manualMaxDist, 
+bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire, bool isThunder,
+	bool isInteriorAmbience, bool isManual, float manualMaxDist,
 	float manualRefDist, float manualRollOff, ManualAmbience& ma)
 {
 	if (buffer == 0 || CCutsceneMgr::ms_running || FrontEndMenuManager.m_bMenuActive /*|| (isGunfire && CWeather::WeatherRegion != WEATHER_REGION_LA)*/) // Don't play during a cutscene or when paused
 		return false;
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 	//Log("Ambience pitch: %.2f", pitch);
+	auto inst = std::make_shared<SoundInstance>();
 	CVector pos = GetRandomAmbiencePosition(origin, isThunder, isInteriorAmbience);
-
 	float VolumeToUse = AEAudioHardware.m_fEffectMasterScalingFactor * 1.3f;
 	float refDist = 1.0f;
 	if (isGunfire) {
@@ -705,8 +708,9 @@ bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, boo
 		refDist = 5.5f;
 	}
 	if (AudioManager.PlaySource(buffer, isManual ? manualMaxDist : 250.0f, VolumeToUse, 1.0f, refDist, isManual ? manualRollOff : 1.0f, pitch, pos,
-		false, nullptr, 0, nullptr, nullptr, false, nullptr, std::string(), false, nullptr, eWeaponType(0), isGunfire, isInteriorAmbience, false, false, 0, isManual ? !ma.allowOtherAmbiences : true))
+		false, nullptr, 0, &inst, nullptr, false, nullptr, std::string(), false, nullptr, eWeaponType(0), isGunfire, isInteriorAmbience, false, false, 0, isManual ? !ma.allowOtherAmbiences : true))
 	{
+		inst->isManualAmbience = isManual;
 		Log("PlayAmbienceBuffer returned true");
 		return true;
 	}
@@ -720,6 +724,7 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 	bool isNight = CClock::ms_nGameClockHours >= 20 || CClock::ms_nGameClockHours < 6;
 	bool isRiot = CGameLogic::LaRiotsActiveHere();
 	CVector playerPos = FindPlayerCoors();
+
 	// --- 0) Detect interior->interior switch (warp while staying inside) ---
 	if (prevCurrArea > 0 && CGame::currArea > 0 && prevCurrArea != CGame::currArea) {
 		// We changed interiors while still "inside" -> stop old interior ambience(s) and allow new to play
@@ -926,7 +931,7 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 				bool inside = IsPointWithinSphere(ma.sphere, playerPos);
 				if (!inside) {
 					AudioManager.StopLoopingAmbience(ma);
-					Log("ManualAmbience: stopped looping (buffer) - player left range.");
+					Log("ManualAmbience: stopped looping ambience - player left it's range.");
 				}
 			}
 
@@ -981,9 +986,9 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 				// Handle non-looping ambiences
 				if (!ma.loop && CTimer::m_snTimeInMilliseconds >= ma.nextPlayTime) {
 					if (insideRange) {
-						if (!ambienceStillPlaying || ma.allowOtherAmbiences) {
+						if (!ambienceStillPlaying) {
 							if (PlayAmbienceBuffer(buff, ma.pos, false, false, false, true, ma.maxDist, ma.refDist, ma.rollOff, ma)) {
-								ma.nextPlayTime = CTimer::m_snTimeInMilliseconds + ma.delay + (CGeneral::GetRandomNumber() % ma.delay);
+								ma.nextPlayTime = CTimer::m_snTimeInMilliseconds + ma.delay;
 								Log("ManualAmbience: played transient buffer=%u, size=%zu", buff, ma.buffer.size());
 								if (!ma.allowOtherAmbiences) {
 									playedSomething = true;
@@ -994,9 +999,6 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 								Log("ManualAmbience: PlayAmbienceBuffer returned false for buffer=%u", buff);
 							}
 						}
-					}
-					else {
-						ma.nextPlayTime = 0;
 					}
 				}
 			}
@@ -1140,7 +1142,7 @@ void CAudioManager::UnloadManualAmbiences()
 
 
 // Create and play an OpenAL source for looping ambience.
-// Returns true on success and sets ma.loopingSource to the created source.
+// Returns true on success and sets ma.loopingInstance to the created instance.
 bool CAudioManager::StartLoopingAmbience(ManualAmbience& ma)
 {
 	if (ma.buffer.empty()) return false;
@@ -1387,13 +1389,30 @@ bool CAudioManager::SetSourceRolloffFactor(ALuint source, float factor)
 
 bool AudioStream::audioPath(std::string filename, fs::path& outPath)
 {
+	const fs::path filePath(filename);
+
+	// If caller provided an absolute path, check it first
+	if (filePath.is_absolute()) {
+		if (fs::exists(filePath)) {
+			outPath = filePath;
+			auto inst = std::make_shared<SoundInstance>();
+			inst->path = outPath;
+			AudioManager.audiosplaying.push_back(inst);
+			return true;
+		}
+		return false;
+	}
+
+	// Reuse base path object so we don't rebuild it each loop
+	fs::path base = filePath;
 	for (const auto& ext : extensions) {
-		fs::path candidate = audiosfolder / fs::path(filename).replace_extension(ext);
+		fs::path candidate = audiosfolder / base;
+		candidate.replace_extension(ext);
 		if (fs::exists(candidate)) {
+			outPath = candidate;
 			auto inst = std::make_shared<SoundInstance>();
 			inst->path = candidate;
-			outPath = std::move(candidate);
-			AudioManager.audiosplaying.push_back(std::move(inst));
+			AudioManager.audiosplaying.push_back(inst);
 			return true;
 		}
 	}
@@ -1460,4 +1479,31 @@ bool AudioStream::audioPlay(std::string filename, CPhysical* audioEntity)
 	AudioManager.AudioPlay(&selected, audioEntity);
 
 	return true;
+}
+
+void CAudioManager::UpdateFireSoundCleanup() {
+
+	// Clean up non-fire sounds tied to inactive CAEFireAudioEntity
+	for (auto it = g_Buffers.ent.begin(); it != g_Buffers.ent.end();) {
+		CAEFireAudioEntity* entity = *it;
+		if (entity && entity->field_84) {
+			++it;
+			continue;
+		}
+
+		for (auto nsIt = g_Buffers.nonFireSounds.begin(); nsIt != g_Buffers.nonFireSounds.end();) {
+			auto inst = nsIt->second.get();
+			if (inst) {
+				alSourceStop(inst->source);
+				ALint state;
+				alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
+				if (state == AL_STOPPED && !inst->paused) {
+					alDeleteSources(1, &inst->source);
+				}
+			}
+			nsIt = g_Buffers.nonFireSounds.erase(nsIt);
+		}
+
+		it = g_Buffers.ent.erase(it);
+	}
 }
