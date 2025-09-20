@@ -329,26 +329,69 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 				std::transform(gxtKey.begin(), gxtKey.end(), gxtKey.begin(), ::tolower);
 
 				for (int i = 0; i <= 300; ++i) {
-					fs::path Entry, EntryNoIndex;
+					fs::path chosenDay, chosenNight;
+					fs::path chosenNoIndexDay, chosenNoIndexNight;
+
+					// Look for indexed and non-indexed variants across ALL extensions.
+					// Stop early only when we've found every variant we care about.
 					for (const auto& ext : extensions) {
-						Entry = nameEntry.path() / ("ambience" + std::to_string(i) + ext);
-						EntryNoIndex = nameEntry.path() / ("ambience" + ext);
-						if (fs::exists(Entry) || fs::exists(EntryNoIndex)) break;
+						if (chosenDay.empty()) {
+							fs::path p = nameEntry.path() / ("ambience" + std::to_string(i) + ext);
+							if (fs::exists(p)) chosenDay = p;
+						}
+						if (chosenNight.empty()) {
+							fs::path p = nameEntry.path() / ("ambience_night" + std::to_string(i) + ext);
+							if (fs::exists(p)) chosenNight = p;
+						}
+
+						if (chosenNoIndexDay.empty()) {
+							fs::path p = nameEntry.path() / ("ambience" + ext);
+							if (fs::exists(p)) chosenNoIndexDay = p;
+						}
+						if (chosenNoIndexNight.empty()) {
+							fs::path p = nameEntry.path() / ("ambience_night" + ext);
+							if (fs::exists(p)) chosenNoIndexNight = p;
+						}
+
+						// if we've found everything we could possibly want, break early
+						if (!chosenDay.empty() && !chosenNight.empty()
+							&& (i != 0 || (!chosenNoIndexDay.empty() && !chosenNoIndexNight.empty())))
+						{
+							break;
+						}
 					}
 
-					if (fs::exists(Entry)) {
-						ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(Entry.string().c_str());
-						if (!buffer) { Log("Failed to load : %s", Entry.string().c_str()); continue; }
-						InteriorAmbience sound{ gxtKey, buffer };
-						g_InteriorAmbience[interiorID].push_back(sound);
-						Log("Loaded interior sound for interior ID %d, GXT entry '%s': %s", interiorID, gxtKey.c_str(), Entry.filename().string().c_str());
+					// Now decide which branch to take
+					bool IndexedExists = !chosenDay.empty() || !chosenNight.empty();
+					bool NonIndexExists = !chosenNoIndexDay.empty() || !chosenNoIndexNight.empty();
+
+					if (IndexedExists) {
+						ALuint bufferDay = chosenDay.empty() ? 0 : AudioManager.CreateOpenALBufferFromAudioFile(chosenDay.string().c_str());
+						ALuint bufferNight = chosenNight.empty() ? 0 : AudioManager.CreateOpenALBufferFromAudioFile(chosenNight.string().c_str());
+
+						if (bufferDay || bufferNight) {
+							InteriorAmbience sound{ gxtKey, bufferDay, bufferNight };
+							g_InteriorAmbience[interiorID].push_back(sound);
+							Log("Loaded interior sound for interior ID %d, GXT '%s': day=%s night=%s",
+								interiorID, gxtKey.c_str(),
+								chosenDay.empty() ? "none" : chosenDay.filename().string().c_str(),
+								chosenNight.empty() ? "none" : chosenNight.filename().string().c_str()
+							);
+						}
 					}
-					else if (i == 0 && fs::exists(EntryNoIndex)) {
-						ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(EntryNoIndex.string().c_str());
-						if (!buffer) { Log("Failed to load audio file for interior ambience: %s", EntryNoIndex.string().c_str()); continue; }
-						InteriorAmbience sound{ gxtKey, buffer };
-						g_InteriorAmbience[interiorID].push_back(sound);
-						Log("Loaded singular interior sound for interior ID %d, GXT entry '%s': %s", interiorID, gxtKey.c_str(), EntryNoIndex.filename().string().c_str());
+					else if (NonIndexExists) {
+						ALuint bufferDay = chosenNoIndexDay.empty() ? 0 : AudioManager.CreateOpenALBufferFromAudioFile(chosenNoIndexDay.string().c_str());
+						ALuint bufferNight = chosenNoIndexNight.empty() ? 0 : AudioManager.CreateOpenALBufferFromAudioFile(chosenNoIndexNight.string().c_str());
+
+						if (bufferDay || bufferNight) {
+							InteriorAmbience sound{ gxtKey, bufferDay, bufferNight };
+							g_InteriorAmbience[interiorID].push_back(sound);
+							Log("Loaded singular interior sound for interior ID %d, GXT '%s': day=%s night=%s",
+								interiorID, gxtKey.c_str(),
+								chosenNoIndexDay.empty() ? "none" : chosenNoIndexDay.filename().string().c_str(),
+								chosenNoIndexNight.empty() ? "none" : chosenNoIndexNight.filename().string().c_str()
+							);
+						}
 						break;
 					}
 				}
@@ -462,26 +505,26 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 					}
 					buffers.push_back(buffer);
 				}
-					if (!buffers.empty()) {
-						ManualAmbience ma;
-						ma.pos = CVector(x, y, z);
-						ma.range = range;
-						ma.loop = loop;
-						ma.buffer = buffers;
-						ma.time = timeType;
-						ma.delay = delay;
-						ma.nextPlayTime = 0;
-						ma.sphere.Set(ma.range, ma.pos);
-						ma.refDist = refDist;
-						ma.rollOff = rollOff;
-						ma.maxDist = maxDist;
-						ma.allowOtherAmbiences = allow;
+				if (!buffers.empty()) {
+					ManualAmbience ma;
+					ma.pos = CVector(x, y, z);
+					ma.range = range;
+					ma.loop = loop;
+					ma.buffer = buffers;
+					ma.time = timeType;
+					ma.delay = delay;
+					ma.nextPlayTime = 0;
+					ma.sphere.Set(ma.range, ma.pos);
+					ma.refDist = refDist;
+					ma.rollOff = rollOff;
+					ma.maxDist = maxDist;
+					ma.allowOtherAmbiences = allow;
 
-						g_ManualAmbiences.push_back(ma);
+					g_ManualAmbiences.push_back(ma);
 
-						Log("Loaded manual ambience (section %s): %s @(%.1f, %.1f, %.1f) R=%.1f Loop=%d Time=%s Buffers=%zu",
-							section, files.c_str(), x, y, z, range, loop, timeStr.c_str(), g_ManualAmbiences.back().buffer.size());
-					}
+					Log("Loaded manual ambience (section %s): %s @(%.1f, %.1f, %.1f) R=%.1f Loop=%d Time=%s Buffers=%zu",
+						section, files.c_str(), x, y, z, range, loop, timeStr.c_str(), g_ManualAmbiences.back().buffer.size());
+				}
 			}
 		}
 		catch (...) {

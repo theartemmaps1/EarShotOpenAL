@@ -22,7 +22,8 @@ public:
 
 struct InteriorAmbience {
 	std::string gxtKey;
-	ALuint buffer;
+	ALuint bufferDay;
+	ALuint bufferNight;
 };
 
 

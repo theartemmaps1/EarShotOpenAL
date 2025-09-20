@@ -333,7 +333,7 @@ AudioData CAudioManager::DecodeOGG(const std::string& path)
 	return out;
 }
 
-std::string CAudioManager::OpenALErrorCodeToString(ALenum error) 
+std::string CAudioManager::OpenALErrorCodeToString(ALenum error)
 {
 	switch (error) {
 	case AL_INVALID_NAME:
@@ -501,7 +501,7 @@ bool CAudioManager::PlaySource(ALuint buff,
 	{
 		inst->entity = ent;
 	}
-	if (shooter && !isFire) 
+	if (shooter && !isFire)
 	{
 		inst->shooter = shooter;
 	}
@@ -695,7 +695,7 @@ bool CAudioManager::findWeapon(eWeaponType* weapontype, eModelID modelid, std::s
 	fs::path path;
 	if (it == registeredweapons.end())
 	{
-	//	Log("registeredweapons == end");
+		//	Log("registeredweapons == end");
 		return false;
 	}
 	// if we don't want to play any audio, just check for file's existence instead
@@ -904,8 +904,17 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 							int index = rnd.next();
 							const InteriorAmbience* chosenSound =
 								matchingSounds[index];
+							ALuint bufferToPlay = 0;
 
-							if (PlayAmbienceBuffer(chosenSound->buffer, origin, false, false, true)) {
+							if (!isNight && chosenSound->bufferDay) {
+								bufferToPlay = chosenSound->bufferDay;
+							}
+							else if (isNight && chosenSound->bufferNight) {
+								bufferToPlay = chosenSound->bufferNight;
+							}
+
+
+							if (PlayAmbienceBuffer(bufferToPlay, origin, false, false, true)) {
 								nextInteriorAmbienceTime = CTimer::m_snTimeInMilliseconds +
 									(CGeneral::GetRandomNumber() % (interiorIntervalMax - interiorIntervalMin)) + interiorIntervalMin;
 								return true; // Stop after playing
@@ -1513,7 +1522,7 @@ bool AudioStream::audioPlay(std::string filename, CPhysical* audioEntity)
 	return true;
 }
 
-void CAudioManager::UpdateFireSoundCleanup() 
+void CAudioManager::UpdateFireSoundCleanup()
 {
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 	auto SafeDeleteInstanceSource = [&](std::shared_ptr<SoundInstance> inst) {
@@ -1575,7 +1584,7 @@ void CAudioManager::UpdateFireSoundCleanup()
 		auto it = g_Buffers.fireSounds.find(fire);
 		if (it != g_Buffers.fireSounds.end()) {
 			auto& inst = it->second;
-			if (inst && inst->source) 
+			if (inst && inst->source)
 			{
 				alSourcef(inst->source, AL_PITCH, pitch);
 			}

@@ -445,13 +445,13 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 			int id = rnd.next();
 			ALuint buff = (*explosionUnderwaterBuffers)[id];
 			handled = AudioManager.PlaySource(buff,
-					4000.0f,
-					AEAudioHardware.m_fEffectMasterScalingFactor * 0.9f,
-					3.0f,
-					15.0f,
-					0.20f,
-					pitch,
-					*posn);
+				4000.0f,
+				AEAudioHardware.m_fEffectMasterScalingFactor * 0.9f,
+				3.0f,
+				15.0f,
+				0.20f,
+				pitch,
+				*posn);
 		}
 		// Main explosion
 		else if (auto* explosionBuffers =
@@ -577,7 +577,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 			return nullptr;
 		}
 
-		
+
 		if (inst->entity || inst->shooter) {
 			inst->entity = nullptr;
 			inst->shooter = nullptr;
@@ -1116,9 +1116,9 @@ public:
 			//	DebugMenuAddVarBool8("EarShot", "Toggle reverb type (EAX or EFX)", (int8_t*)&EAXOrNot, nullptr);
 		}
 		// Init everything
-		Events::initRwEvent += [] 
+		Events::initRwEvent += []
 			{
-			AudioManager.Initialize();
+				AudioManager.Initialize();
 			};
 		patch::RedirectCall(0x504D11, PlayMinigunBarrelStopSound);
 		patch::RedirectCall(0x504CD2, PlayMinigunBarrelStopSound);
@@ -1275,57 +1275,57 @@ public:
 						[&](const std::shared_ptr<SoundInstance>& inst) {
 							ALint state;
 							alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
-								// Update missile sound position and velocity
-								if (!inst->isFire && (!inst->firePtr || !inst->fireFX) && state == AL_PLAYING)
-								{
-									if (inst->entity && IsEntityPointerValid(inst->entity) && inst->bIsMissile && inst->missileSource != 0 && inst->source == inst->missileSource) {
-										alSource3f(inst->missileSource, AL_POSITION,
-											inst->entity->GetPosition().x,
-											inst->entity->GetPosition().y,
-											inst->entity->GetPosition().z);
-										alSource3f(inst->missileSource, AL_VELOCITY,
-											inst->entity->m_vecMoveSpeed.x,
-											inst->entity->m_vecMoveSpeed.y,
-											inst->entity->m_vecMoveSpeed.z);
+							// Update missile sound position and velocity
+							if (!inst->isFire && (!inst->firePtr || !inst->fireFX) && state == AL_PLAYING)
+							{
+								if (inst->entity && IsEntityPointerValid(inst->entity) && inst->bIsMissile && inst->missileSource != 0 && inst->source == inst->missileSource) {
+									alSource3f(inst->missileSource, AL_POSITION,
+										inst->entity->GetPosition().x,
+										inst->entity->GetPosition().y,
+										inst->entity->GetPosition().z);
+									alSource3f(inst->missileSource, AL_VELOCITY,
+										inst->entity->m_vecMoveSpeed.x,
+										inst->entity->m_vecMoveSpeed.y,
+										inst->entity->m_vecMoveSpeed.z);
 
-										CVector direction = inst->entity->GetForward();
-										alSourcef(inst->missileSource, AL_CONE_INNER_ANGLE, 60.0f);
-										alSourcef(inst->missileSource, AL_CONE_OUTER_ANGLE, 180.0f);
-										alSourcef(inst->missileSource, AL_CONE_OUTER_GAIN, 0.3f);
-										alSource3f(inst->missileSource, AL_DIRECTION, direction.x, direction.y, direction.z);
+									CVector direction = inst->entity->GetForward();
+									alSourcef(inst->missileSource, AL_CONE_INNER_ANGLE, 60.0f);
+									alSourcef(inst->missileSource, AL_CONE_OUTER_ANGLE, 180.0f);
+									alSourcef(inst->missileSource, AL_CONE_OUTER_GAIN, 0.3f);
+									alSource3f(inst->missileSource, AL_DIRECTION, direction.x, direction.y, direction.z);
 
-									}
-
-									if (inst->entity && IsEntityPointerValid(inst->entity)) {
-										alSource3f(inst->source, AL_POSITION,
-											inst->entity->GetPosition().x,
-											inst->entity->GetPosition().y,
-											inst->entity->GetPosition().z);
-										alSource3f(inst->source, AL_VELOCITY,
-											inst->entity->m_vecMoveSpeed.x,
-											inst->entity->m_vecMoveSpeed.y,
-											inst->entity->m_vecMoveSpeed.z);
-										CVector direction = inst->entity->GetForward();
-										alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
-									}
-									else if (inst->shooter && IsPedPointerValid(inst->shooter))
-									{
-										alSource3f(inst->source, AL_POSITION,
-											inst->shooter->GetPosition().x,
-											inst->shooter->GetPosition().y,
-											inst->shooter->GetPosition().z);
-										alSource3f(inst->source, AL_VELOCITY,
-											inst->shooter->m_vecMoveSpeed.x,
-											inst->shooter->m_vecMoveSpeed.y,
-											inst->shooter->m_vecMoveSpeed.z);
-										CVector direction = inst->shooter->GetForward();
-										alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
-									}
 								}
-								if (inst->shooter && inst->minigunBarrelSpin && inst->source != 0)
-								{
-									alSource3f(inst->source, AL_POSITION, inst->shooter->GetPosition().x, inst->shooter->GetPosition().y, inst->shooter->GetPosition().z);
+
+								if (inst->entity && IsEntityPointerValid(inst->entity)) {
+									alSource3f(inst->source, AL_POSITION,
+										inst->entity->GetPosition().x,
+										inst->entity->GetPosition().y,
+										inst->entity->GetPosition().z);
+									alSource3f(inst->source, AL_VELOCITY,
+										inst->entity->m_vecMoveSpeed.x,
+										inst->entity->m_vecMoveSpeed.y,
+										inst->entity->m_vecMoveSpeed.z);
+									CVector direction = inst->entity->GetForward();
+									alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
 								}
+								else if (inst->shooter && IsPedPointerValid(inst->shooter))
+								{
+									alSource3f(inst->source, AL_POSITION,
+										inst->shooter->GetPosition().x,
+										inst->shooter->GetPosition().y,
+										inst->shooter->GetPosition().z);
+									alSource3f(inst->source, AL_VELOCITY,
+										inst->shooter->m_vecMoveSpeed.x,
+										inst->shooter->m_vecMoveSpeed.y,
+										inst->shooter->m_vecMoveSpeed.z);
+									CVector direction = inst->shooter->GetForward();
+									alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
+								}
+							}
+							if (inst->shooter && inst->minigunBarrelSpin && inst->source != 0)
+							{
+								alSource3f(inst->source, AL_POSITION, inst->shooter->GetPosition().x, inst->shooter->GetPosition().y, inst->shooter->GetPosition().z);
+							}
 
 							// To prevent overflow, we erase any sources that are no longer used
 							if (state != AL_PLAYING && state != AL_PAUSED) {
@@ -1344,9 +1344,9 @@ public:
 
 		// Shut down everything
 		shutdownGameEvent += []()
-		{
-			AudioManager.Shutdown();
-		};
+			{
+				AudioManager.Shutdown();
+			};
 
 		ClearForRestartEvent += []()
 			{
