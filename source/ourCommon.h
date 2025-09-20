@@ -119,6 +119,7 @@ struct Buffers
 	std::vector<ALuint> molotovExplosionBuffers;
 	std::vector<ALuint> explosionsDebrisBuffers;
 	std::vector<ALuint> explosionDistantBuffers;
+	std::vector<ALuint> explosionUnderwaterBuffers;
 	std::vector<ALuint> ricochetBuffers;
 	std::unordered_map<std::string, std::vector<ALuint>> ricochetBuffersPerMaterial;
 	std::unordered_map<std::string, std::vector<ALuint>> footstepBuffersPerSurface;
@@ -159,6 +160,7 @@ struct Buffers
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeExplosionBuffers;
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeDistantBuffers;
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeDebrisBuffers;
+	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeUnderwaterBuffers;
 	std::unordered_map<CEntity*, int32_t> g_ExplosionTypes;
 };
 

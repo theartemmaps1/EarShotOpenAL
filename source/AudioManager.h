@@ -149,6 +149,7 @@ public:
 	AudioData DecodeMP3(const std::string& path);
 	AudioData DecodeFLAC(const std::string& path);
 	AudioData DecodeOGG(const std::string& path);
+	std::string OpenALErrorCodeToString(ALenum error);
 	ALuint CreateOpenALBufferFromAudioFile(const fs::path& path);
 	void UpdateFireSoundCleanup();
 	void AudioPlay(fs::path* audiopath, CPhysical* audioentity);

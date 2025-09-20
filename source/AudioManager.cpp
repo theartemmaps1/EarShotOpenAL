@@ -52,9 +52,10 @@ void CAudioManager::Initialize()
 	pContext = nullptr;
 
 	pDevice = alcOpenDevice(nullptr);
+	ALenum error = alGetError();
 	if (!pDevice) {
-		Log("Could not open OpenAL device!");
-		modMessage("Could not open OpenAL device!");
+		Log("Could not open OpenAL device! Error: %s", OpenALErrorCodeToString(error));
+		modMessage("Could not open OpenAL device! Error:" + OpenALErrorCodeToString(error));
 		return;
 	}
 
@@ -329,6 +330,35 @@ AudioData CAudioManager::DecodeOGG(const std::string& path)
 	out.samples = std::move(buffer);
 
 	return out;
+}
+
+std::string CAudioManager::OpenALErrorCodeToString(ALenum error) 
+{
+	switch (error) {
+	case AL_INVALID_NAME:
+		return "Invalid name (ID) passed to an AL call.";
+		break;
+
+	case AL_INVALID_ENUM:
+		return "Invalid enumeration passed to AL call.";
+		break;
+
+	case AL_INVALID_VALUE:
+		return "Invalid value passed to AL call.";
+		break;
+
+	case AL_INVALID_OPERATION:
+		return "Illegal AL call.";
+		break;
+
+	case AL_OUT_OF_MEMORY:
+		return "Not enough memory to execute the AL call.";
+		break;
+
+	default:
+		return "Unknown error.";
+		break;
+	}
 }
 
 ALuint CAudioManager::CreateOpenALBufferFromAudioFile(const fs::path& path) {
@@ -1352,6 +1382,7 @@ bool CAudioManager::PlaySource2D(ALuint buff, bool relative, float volume, float
 	alSourcef(inst->source, AL_GAIN, volume);
 	alSourcef(inst->source, AL_PITCH, pitch);
 	alSourcePlay(inst->source);
+	AudioManager.audiosplaying.push_back(inst);
 	return true;
 }
 

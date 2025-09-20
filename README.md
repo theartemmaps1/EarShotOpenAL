@@ -18,7 +18,7 @@ So he told me if i could do something about it, and that's where things began to
 I began by changing the sound engine from deprecated "irrKlang" to OpenAL, which is used by most games and apps, fixing bugs and improving the mod.
 And that's how we are here! :) Have fun adding new sounds to your game! Max detailed instructions are down below.
 
-The .zip also includes four
+The .zip also includes four additional weapon packs for you to choose from. (Optional).
 
 Most important: double check if your sound is MONO for 3D spatialization (otherwise if it's STEREO, it won't have distance attenuation and will play in 2D space!!!)
 But if you neeed it to be stereo, then let it be. Useful for bullet whizzing sounds only i think, since they have no position in 3D space.
@@ -50,7 +50,7 @@ Nag Grinch to remove that :D.
 
 # Installation:
 
-The .asi and .ini file, as well as "EarShot" folder can be placed anywhere, (scripts, root, modloader), but the OpenAL32.dll should be in the root folder, always.
+The .asi and .ini file, as well as "EarShot" folder can be placed anywhere, (scripts, root, modloader), but the OpenAL32.dll and alsoft.ini should be in the root folder, always.
 
 
 Possible output:
@@ -80,7 +80,7 @@ Some weapons can have TWO separate reloading sounds, so if that's the case, name
 
 TIP: i recommend checking the "EarShotOpenAL.log" logfile for more useful info.
 
-For a distant shot add a file named "distant.wav", and it'll play it when you're far away enough from the shooter (50 units).
+For a distant shot add a file named "distant.wav", and it'll play it when you're far away enough from the shooter (50 units, can be adjusted in .ini).
 
 # 1.1. Minigun special:
 If you're replacing minigun sounds, the barrel spinning sounds for it is "spin.wav" (main spinning loop), and "spin_end.wav" (when done spinning).
@@ -122,7 +122,8 @@ They are replaced in GameFolder\EarShot\generic\explosions folder.
 
 Main explosion sounds are named "explosion.wav", and you can add alternatives for it too (like i said earlier, you can add alternatives for every sound).
 For distant explosion sounds add a "distant.wav" audio file, for debris do "debris.wav".
-Distant explosion sounds will play when the explosions happens 100 units away from the camera.
+For underwater explosions, add a "underwater.wav" audio file.
+Distant explosion sounds will play when the explosions happens 100 units away from the camera (can be adjusted in .ini).
 
 Explosion types: https://wiki.multitheftauto.com/wiki/Explosion_types
 

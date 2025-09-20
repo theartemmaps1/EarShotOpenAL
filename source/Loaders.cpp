@@ -794,6 +794,7 @@ void Loaders::LoadExplosionRelatedSounds(const fs::path& folder) {
 	g_Buffers.ExplosionTypeExplosionBuffers.clear();
 	g_Buffers.ExplosionTypeDebrisBuffers.clear();
 	g_Buffers.ExplosionTypeDistantBuffers.clear();
+	g_Buffers.ExplosionTypeUnderwaterBuffers.clear();
 
 	auto loadBuffers = [](const fs::path& path, std::vector<ALuint>& vec, const std::string& prefix) {
 		int idx = 0;
@@ -846,6 +847,9 @@ void Loaders::LoadExplosionRelatedSounds(const fs::path& folder) {
 			auto& distantVec = g_Buffers.ExplosionTypeDistantBuffers[typeID];
 			loadBuffers(entry.path(), distantVec, "distant");
 
+			auto& underwaterVec = g_Buffers.ExplosionTypeUnderwaterBuffers[typeID];
+			loadBuffers(entry.path(), underwaterVec, "underwater");
+
 			Log("Loaded explosionType '%d' sounds from %s", typeID, entry.path().string().c_str());
 		}
 	}
@@ -856,7 +860,8 @@ void Loaders::LoadExplosionRelatedSounds(const fs::path& folder) {
 	std::vector<SoundFile> genericFiles = {
 		{ "explosion", g_Buffers.explosionBuffers },
 		{ "debris", g_Buffers.explosionsDebrisBuffers },
-		{ "distant", g_Buffers.explosionDistantBuffers }
+		{ "distant", g_Buffers.explosionDistantBuffers },
+		{ "underwater", g_Buffers.explosionUnderwaterBuffers }
 	};
 
 	while (true) {

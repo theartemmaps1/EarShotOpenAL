@@ -9,6 +9,8 @@
 #include <CAudioEngine.h>
 #include <eSurfaceType.h>
 
+#include "CWaterLevel.h"
+
 #include "CClock.h"
 #include "CCollision.h"
 #include "CCullZones.h"
@@ -387,7 +389,8 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 	// We only process those that aren't really far away (except for distant sounds)
 	bool farAway = dist > distanceForDistantExplosion;
 	bool handled = false;
-
+	float waterLevel = 0.0f;
+	bool isUnderWater = CWaterLevel::GetWaterLevelNoWaves(posn->x, posn->y, posn->z, &waterLevel, nullptr, nullptr);
 	auto OG = [&]()
 		{
 			Log("HookedCAEExplosionAudioEntity_AddAudioEvent: fallback to vanilla");
@@ -429,9 +432,29 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 			return nullptr;
 		};
 
+	auto* explosionUnderwaterBuffers =
+		chooseBuffers(g_Buffers.ExplosionTypeUnderwaterBuffers,
+			/*g_Buffers.WeaponTypeExplosionBuffers,*/
+			&g_Buffers.explosionUnderwaterBuffers, "underwater explosion");
+
 	if (!farAway) {
+		// Underwater explosion
+		if (isUnderWater && posn->z < waterLevel && explosionUnderwaterBuffers) {
+			RandomUnique rnd(explosionUnderwaterBuffers->size());
+			auto inst = std::make_shared<SoundInstance>();
+			int id = rnd.next();
+			ALuint buff = (*explosionUnderwaterBuffers)[id];
+			handled = AudioManager.PlaySource(buff,
+					4000.0f,
+					AEAudioHardware.m_fEffectMasterScalingFactor * 0.9f,
+					3.0f,
+					15.0f,
+					0.20f,
+					pitch,
+					*posn);
+		}
 		// Main explosion
-		if (auto* explosionBuffers =
+		else if (auto* explosionBuffers =
 			chooseBuffers(g_Buffers.ExplosionTypeExplosionBuffers,
 				/*g_Buffers.WeaponTypeExplosionBuffers,*/
 				&g_Buffers.explosionBuffers, "main explosion"))
