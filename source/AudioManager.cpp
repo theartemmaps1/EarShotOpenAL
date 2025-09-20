@@ -16,6 +16,7 @@
 #include "vendor/dr_libs/dr_mp3.h"
 #include <stb_vorbis.c>
 #include "CSphere.h"
+#include <CFireManager.h>
 CAudioManager AudioManager;
 
 // Is FX supported?
@@ -1512,7 +1513,22 @@ bool AudioStream::audioPlay(std::string filename, CPhysical* audioEntity)
 	return true;
 }
 
-void CAudioManager::UpdateFireSoundCleanup() {
+void CAudioManager::UpdateFireSoundCleanup() 
+{
+	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+	auto SafeDeleteInstanceSource = [&](std::shared_ptr<SoundInstance> inst) {
+		if (!inst) return;
+		if (inst->source != 0) {
+			alDeleteSources(1, &inst->source);
+			inst->source = 0;
+		}
+
+		inst->entity = nullptr;
+		inst->shooter = nullptr;
+		inst->firePtr = nullptr;
+		inst->paused = false;
+		inst->isFire = false;
+		};
 
 	// Clean up non-fire sounds tied to inactive CAEFireAudioEntity
 	for (auto it = g_Buffers.ent.begin(); it != g_Buffers.ent.end();) {
@@ -1536,5 +1552,33 @@ void CAudioManager::UpdateFireSoundCleanup() {
 		}
 
 		it = g_Buffers.ent.erase(it);
+	}
+
+	// update non-fire sfx pitch
+	for (auto nsIt = g_Buffers.nonFireSounds.begin(); nsIt != g_Buffers.nonFireSounds.end(); ++nsIt) {
+		auto inst = nsIt->second.get();
+		if (inst && inst->source) {
+			alSourcef(inst->source, AL_PITCH, pitch);
+		}
+	}
+
+	for (int i = 0; i < MAX_NUM_FIRES; i++) {
+		CFire* fire = &gFireManager.m_aFires[i];
+		if (fire && (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise)) {
+			auto it = g_Buffers.fireSounds.find(fire);
+			if (it != g_Buffers.fireSounds.end()) {
+				SafeDeleteInstanceSource(it->second);
+				g_Buffers.fireSounds.erase(it);
+			}
+			continue;
+		}
+		auto it = g_Buffers.fireSounds.find(fire);
+		if (it != g_Buffers.fireSounds.end()) {
+			auto& inst = it->second;
+			if (inst && inst->source) 
+			{
+				alSourcef(inst->source, AL_PITCH, pitch);
+			}
+		}
 	}
 }

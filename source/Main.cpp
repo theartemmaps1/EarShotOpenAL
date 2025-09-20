@@ -587,7 +587,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		};
 
 	auto PlayOrUpdatePositional = [&](int evt, const std::vector<ALuint>& buffers, const CVector& position) -> bool {
-		if (buffers.empty() || CTimer::ms_fTimeScale <= 0.0f) return false;
+		if (buffers.empty()) return false;
 
 		if (EnsureNonFireInstanceValid(evt)) {
 			auto inst = g_Buffers.nonFireSounds[evt];
@@ -624,7 +624,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		};
 
 	auto PlayOrUpdateFireLoop = [&](CFire* fire, const std::vector<ALuint>& buffers) -> bool {
-		if (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise || CTimer::ms_fTimeScale <= 0.0f || buffers.empty()) return false;
+		if (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise || buffers.empty()) return false;
 
 		CVector pos = fire->m_vecPosition;
 		auto inst = GetOrCleanupFireInstance(fire);
@@ -690,14 +690,6 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 
 	for (int i = 0; i < MAX_NUM_FIRES; i++) {
 		CFire* fire = &gFireManager.m_aFires[i];
-		if (!fire->m_nFlags.bActive || !fire->m_nFlags.bMakesNoise) {
-			auto it = g_Buffers.fireSounds.find(fire);
-			if (it != g_Buffers.fireSounds.end()) {
-				SafeDeleteInstanceSource(it->second);
-				g_Buffers.fireSounds.erase(it);
-			}
-			continue;
-		}
 
 		switch (eventId) {
 		case AE_FIRE:
