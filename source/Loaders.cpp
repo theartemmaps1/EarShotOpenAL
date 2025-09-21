@@ -166,7 +166,7 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 					bool matchesExtension = false;
 					std::string suffix;
 					for (const auto& ext : extensions) {
-						if (filename.rfind(prefix, 0) == 0 && filename.size() > prefix.size() + ext.size() &&
+						if (filename.rfind(prefix, 0) == 0 && filename.size() >= prefix.size() + ext.size() &&
 							filename.compare(filename.size() - ext.size(), ext.size(), ext) == 0) {
 							matchesExtension = true;
 							suffix = ext;
@@ -226,7 +226,7 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 				bool matchesExtension = false;
 				std::string suffix;
 				for (const auto& ext : extensions) {
-					if (filename.rfind(prefix, 0) == 0 && filename.size() > prefix.size() + ext.size() &&
+					if (filename.rfind(prefix, 0) == 0 && filename.size() >= prefix.size() + ext.size() &&
 						filename.compare(filename.size() - ext.size(), ext.size(), ext) == 0) {
 						matchesExtension = true;
 						suffix = ext;
