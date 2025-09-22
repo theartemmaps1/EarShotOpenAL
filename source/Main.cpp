@@ -511,7 +511,7 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 
 }
 
-auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, void*, int eventId, CVector* posn) {
+auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, int, int eventId, CVector* posn) {
 	// Keep track of CAEFireAudioEntity to check FX existence later
 	if (std::find(g_Buffers.ent.begin(), g_Buffers.ent.end(), ts) == g_Buffers.ent.end()) {
 		g_Buffers.ent.push_back(ts);
@@ -1355,6 +1355,10 @@ public:
 				nextZoneAmbienceTime = 0;
 				nextFireAmbienceTime = 0;
 				//AudioManager.UnloadManualAmbiences();
+
+				// FIX: game would crash on reload when the non-fire fire was active
+				g_Buffers.ent.clear();
+
 				for (auto& inst : AudioManager.audiosplaying)
 				{
 					if (inst->isAmbience) {

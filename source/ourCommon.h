@@ -92,7 +92,7 @@ typedef void(__thiscall* originalCAEPedAudioEntity__HandlePedHit)(int a2, CPhysi
 typedef char(__thiscall* originalCAEPedAudioEntity__HandlePedSwing)(int a2, int a3, int a4);
 typedef void(__thiscall* originalCAEExplosionAudioEntity__AddAudioEvent)(int event, CVector* pos, float volume);
 typedef char(__thiscall* originalCAEPedAudioEntity__HandlePedJacked)(int AudioEvent);
-typedef void(__thiscall* originalCAEFireAudioEntity__AddAudioEvent)(int AudioEvent, CVector* posn);
+typedef void(__fastcall* originalCAEFireAudioEntity__AddAudioEvent)(int AudioEvent, CVector* posn);
 typedef int(__fastcall* originalCAudioEngine__ReportBulletHit)(CEntity* entity, eSurfaceType surface, const CVector& posn, float angleWithColPointNorm);
 typedef void(__thiscall* originalCAEPedAudioEntity__AddAudioEvent)(eAudioEvents event, float volume, float speed, CPhysical* ped, uint8_t surfaceId, int32_t a7, uint32_t maxVol);
 typedef bool(__cdecl* originalCExplosion__AddExplosion)(CEntity* victim, CEntity* creator, eExplosionType type, CVector pos, uint32_t lifetime, uint8_t usesSound, float cameraShake, uint8_t bInvisible);
