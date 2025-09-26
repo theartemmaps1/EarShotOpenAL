@@ -77,7 +77,7 @@ struct ManualAmbience {
 	float rollOff;
 	bool allowOtherAmbiences;
 	ManualAmbience()
-		: pos{ 0.0f,0.0f,0.0f }, range(50.0f), loop(false), loopingInstance(nullptr), time(EAmbienceTime::Any), delay(0), nextPlayTime(0),
+		: pos{ 0.0f,0.0f,0.0f }, range(50.0f), loop(false), allowOtherAmbiences(true), loopingInstance(nullptr), time(EAmbienceTime::Any), delay(0), nextPlayTime(0),
 		maxDist(50.0f), refDist(1.0f), rollOff(1.0f)
 	{
 		sphere.Set(range, pos);
@@ -92,9 +92,9 @@ inline CVector GetRandomAmbiencePosition(const CVector& origin, bool isThunder =
 	return origin + CVector(cosf(angle) * distance, sinf(angle) * distance, 2.0f);
 }
 
-inline static uint32_t nextInteriorAmbienceTime = 0;
-inline static uint32_t nextZoneAmbienceTime = 0;
-inline static uint32_t nextFireAmbienceTime = 0;
+inline uint32_t nextInteriorAmbienceTime = 0;
+inline uint32_t nextZoneAmbienceTime = 0;
+inline uint32_t nextFireAmbienceTime = 0;
 
 class CAudioManager
 {

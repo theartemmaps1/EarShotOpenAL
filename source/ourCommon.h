@@ -544,14 +544,3 @@ inline bool NameStartsWithIndexedSuffix(const char* name, const std::string& pre
 inline bool AddExplosion(CEntity* victim, CEntity* creator, int32_t explosionType, CVector& posn, unsigned int time, unsigned char makeSound, float camShake, unsigned char visibility) {
 	return plugin::CallAndReturn<bool, 0x736A50>(victim, creator, explosionType, posn, time, makeSound, camShake, visibility);
 }
-
-inline CVector operator/(const CVector& left, float right)
-{
-	return CVector(left.x / right, left.y / right, left.z / right);
-}
-
-inline CVector
-CrossProduct(const CVector& v1, const CVector& v2)
-{
-	return CVector(v1.y * v2.z - v1.z * v2.y, v1.z * v2.x - v1.x * v2.z, v1.x * v2.y - v1.y * v2.x);
-}

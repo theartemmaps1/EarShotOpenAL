@@ -916,7 +916,7 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 
 							if (PlayAmbienceBuffer(bufferToPlay, origin, false, false, true)) {
 								nextInteriorAmbienceTime = CTimer::m_snTimeInMilliseconds +
-									(CGeneral::GetRandomNumber() % (interiorIntervalMax - interiorIntervalMin)) + interiorIntervalMin;
+									CGeneral::GetRandomNumberInRange((int)interiorIntervalMin, (int)interiorIntervalMax);
 								return true; // Stop after playing
 							}
 						}
@@ -1072,7 +1072,7 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 							ALuint buffer = vec[index];
 							if (PlayAmbienceBuffer(buffer, origin)) {
 								nextZoneAmbienceTime = CTimer::m_snTimeInMilliseconds +
-									(CGeneral::GetRandomNumber() % (zoneIntervalMax - zoneIntervalMin)) + zoneIntervalMin;
+									CGeneral::GetRandomNumberInRange((int)zoneIntervalMin, (int)zoneIntervalMax);
 								playedSomething = true;
 								//return true;
 								break;
@@ -1106,7 +1106,7 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 					ALuint buffer = it->second[index];
 					if (PlayAmbienceBuffer(buffer, origin)) {
 						nextZoneAmbienceTime = CTimer::m_snTimeInMilliseconds +
-							(CGeneral::GetRandomNumber() % (zoneIntervalMax - zoneIntervalMin)) + zoneIntervalMin;
+							CGeneral::GetRandomNumberInRange((int)zoneIntervalMin, (int)zoneIntervalMax);
 						playedSomething = true;  // global played
 						return true;
 					}
@@ -1136,7 +1136,7 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 						ALuint buffer = (*selectedBuffs)[index];
 						if (PlayAmbienceBuffer(buffer, origin)) {
 							nextFireAmbienceTime = CTimer::m_snTimeInMilliseconds +
-								(CGeneral::GetRandomNumber() % (fireIntervalMax - fireIntervalMin)) + fireIntervalMin;
+								CGeneral::GetRandomNumberInRange((int)fireIntervalMin, (int)fireIntervalMax);
 							return true;
 						}
 					}
@@ -1199,11 +1199,11 @@ bool CAudioManager::StartLoopingAmbience(ManualAmbience& ma)
 
 	bool ok = PlaySource(
 		buff,
-		ma.range,
+		ma.maxDist,
 		gain,
 		1.0f,
-		1.0f,
-		1.0f,
+		ma.refDist,
+		ma.rollOff,
 		pitch,
 		ma.pos,
 		false,

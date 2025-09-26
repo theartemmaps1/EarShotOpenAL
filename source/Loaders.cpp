@@ -506,24 +506,28 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 					buffers.push_back(buffer);
 				}
 				if (!buffers.empty()) {
-					ManualAmbience ma;
-					ma.pos = CVector(x, y, z);
-					ma.range = range;
-					ma.loop = loop;
-					ma.buffer = buffers;
-					ma.time = timeType;
-					ma.delay = delay;
-					ma.nextPlayTime = 0;
-					ma.sphere.Set(ma.range, ma.pos);
-					ma.refDist = refDist;
-					ma.rollOff = rollOff;
-					ma.maxDist = maxDist;
-					ma.allowOtherAmbiences = allow;
+					auto it = std::find_if(g_ManualAmbiences.begin(), g_ManualAmbiences.end(),
+						[&](const ManualAmbience& s) { return s.buffer == buffers; });
+					if (it == g_ManualAmbiences.end()) {
+						ManualAmbience ma;
+						ma.pos = CVector(x, y, z);
+						ma.range = range;
+						ma.loop = loop;
+						ma.buffer = buffers;
+						ma.time = timeType;
+						ma.delay = delay;
+						ma.nextPlayTime = 0;
+						ma.sphere.Set(ma.range, ma.pos);
+						ma.refDist = refDist;
+						ma.rollOff = rollOff;
+						ma.maxDist = maxDist;
+						ma.allowOtherAmbiences = allow;
 
-					g_ManualAmbiences.push_back(ma);
+						g_ManualAmbiences.push_back(ma);
 
-					Log("Loaded manual ambience (section %s): %s @(%.1f, %.1f, %.1f) R=%.1f Loop=%d Time=%s Buffers=%zu",
-						section, files.c_str(), x, y, z, range, loop, timeStr.c_str(), g_ManualAmbiences.back().buffer.size());
+						Log("Loaded manual ambience (section %s): %s @(%.1f, %.1f, %.1f) R=%.1f Loop=%d Time=%s Buffers=%zu",
+							section, files.c_str(), x, y, z, range, loop, timeStr.c_str(), g_ManualAmbiences.back().buffer.size());
+					}
 				}
 			}
 		}

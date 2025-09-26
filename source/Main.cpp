@@ -390,7 +390,7 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 	bool farAway = dist > distanceForDistantExplosion;
 	bool handled = false;
 	float waterLevel = 0.0f;
-	bool isUnderWater = CWaterLevel::GetWaterLevelNoWaves(posn->x, posn->y, posn->z, &waterLevel, nullptr, nullptr);
+	bool isUnderWater = CWaterLevel::GetWaterLevelNoWaves(posn->x, posn->y, posn->z, &waterLevel);
 	auto OG = [&]()
 		{
 			Log("HookedCAEExplosionAudioEntity_AddAudioEvent: fallback to vanilla");
@@ -1046,7 +1046,7 @@ bool __cdecl TriggerTankFireHooked(CEntity* victim, CEntity* creator, eExplosion
 		}
 	}
 	subhook_remove(subhookCExplosion__AddExplosion);
-	bool result = AddExplosion(victim, creator, type, pos, lifetime, usesSound, cameraShake, bInvisible);
+	bool result = CExplosion::AddExplosion(victim, creator, type, pos, lifetime, usesSound, cameraShake, bInvisible);
 	subhook_install(subhookCExplosion__AddExplosion);
 	g_lastExplosionType[creator] = -1;
 	return result;
@@ -1361,20 +1361,6 @@ public:
 
 				for (auto& inst : AudioManager.audiosplaying)
 				{
-					if (inst->isAmbience) {
-						if (inst->source != 0) {
-							ALint state = AL_STOPPED;
-							alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
-							if (state == AL_PLAYING || state == AL_PAUSED) {
-								AudioManager.PauseSource(&*inst);
-							}
-							alDeleteSources(1, &inst->source);
-							inst->source = 0;
-						}
-						inst->isAmbience = false;
-						inst->isGunfireAmbience = false;
-						inst->isInteriorAmbience = false;
-					}
 					if (inst->bIsMissile) {
 						if (inst->source == inst->missileSource)
 						{
