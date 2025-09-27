@@ -756,7 +756,7 @@ bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, boo
 	else {
 		refDist = 5.5f;
 	}
-	if (AudioManager.PlaySource(buffer, isManual ? manualMaxDist : 250.0f, VolumeToUse, 1.0f, refDist, isManual ? manualRollOff : 1.0f, pitch, pos,
+	if (AudioManager.PlaySource(buffer, isManual ? manualMaxDist : 250.0f, VolumeToUse, 1.0f, refDist, isManual ? manualRollOff : 1.0f, pitch, isManual ? origin : pos,
 		false, nullptr, 0, &inst, nullptr, false, nullptr, std::string(), false, nullptr, eWeaponType(0), isGunfire, isInteriorAmbience, false, false, 0, isManual ? !ma.allowOtherAmbiences : true))
 	{
 		inst->isManualAmbience = isManual;
