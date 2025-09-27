@@ -573,6 +573,7 @@ void Loaders::ReloadAudioFolders()
 	zoneIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Zone ambience interval max", 10000);
 	distanceForDistantGunshot = ini.ReadFloat("MAIN", "Distant gunshot distance", 50.0f);
 	distanceForDistantExplosion = ini.ReadFloat("MAIN", "Distant explosion distance", 100.0f);
+	stereoAmbienceVol = ini.ReadFloat("MAIN", "Stereo ambience volume", 0.3f);
 	// Stop and delete all currently playing sound sources
 	for (auto& inst : AudioManager.audiosplaying)
 	{

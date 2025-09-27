@@ -1203,13 +1203,30 @@ public:
 								// We update each source's gain so when the screen fades, the sound can fade smoothly as well
 								ALint state;
 								alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
-								if (state == AL_PLAYING)
-								{
-									float rawGain = inst->baseGain;
-									float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
-									float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+								ALint buffer;
+								alGetSourcei(inst->source, AL_BUFFER, &buffer);
+								ALint fmt = AudioManager.GetBufferFormat((ALuint)buffer);
 
-									float gain = gameVol * fader;
+								float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+								float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+								float gain = gameVol * fader;
+
+								if ((inst->isAmbience || inst->isManualAmbience) && state == AL_PLAYING && (fmt == AL_FORMAT_STEREO_FLOAT32 || fmt == AL_FORMAT_MONO_FLOAT32))
+								{
+									// They are loud as hell, decrease the gain a bit
+									if (fmt == AL_FORMAT_STEREO_FLOAT32) {
+										alSourcei(inst->source, AL_SOURCE_RELATIVE, AL_TRUE);
+										alSource3f(inst->source, AL_POSITION, 0.0f, 0.0f, 0.0f);
+										gain *= stereoAmbienceVol;
+									}
+
+									if (CCutsceneMgr::ms_running || CGame::currArea > 0)
+										gain = 0.0f; // mute to not interrupt anything
+
+									AudioManager.SetSourceGain(inst->source, gain);
+								}
+								else if (state == AL_PLAYING)
+								{
 									AudioManager.SetSourceGain(inst->source, gain);
 								}
 								// Doppler effect (never for ambience sounds tho)

@@ -417,6 +417,24 @@ ALuint CAudioManager::CreateOpenALBufferFromAudioFile(const fs::path& path) {
 	return buff;
 }
 
+// Get the format (stereo or mono?)
+ALint CAudioManager::GetBufferFormat(ALuint buffer) 
+{
+	ALint channels = 0;
+	alGetBufferi(buffer, AL_CHANNELS, &channels);
+	if (channels == 1) {
+		return AL_FORMAT_MONO_FLOAT32;
+	}
+	else if (channels == 2)
+	{
+		return AL_FORMAT_STEREO_FLOAT32;
+	}
+	else {
+		return -1;
+	}
+
+}
+
 // To avoid constant OpenAL blocks, we use this func for everything.
 // Used to play 3D sounds in a 3D space.
 // For 2D sounds we use the other func called "PlaySource2D".

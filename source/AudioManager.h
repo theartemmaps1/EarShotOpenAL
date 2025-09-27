@@ -158,6 +158,8 @@ public:
 		float manualRefDist = 1.0f, float manualRollOff = 1.0f, ManualAmbience& ma = ManualAmbience());
 	bool PlayAmbienceSFX(const CVector& origin, eWeaponType weaponType, bool useOldAmbience);
 	void PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapontype, bool spinning, bool playSpinEndSFX = false);
+	ALint GetBufferFormat(ALuint buffer);
+
 	ALCcontext* GetContext()
 	{
 		return pContext;

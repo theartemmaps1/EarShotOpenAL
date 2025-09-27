@@ -30,6 +30,7 @@ inline uint32_t zoneIntervalMin = 5000;
 inline uint32_t zoneIntervalMax = 10000;
 inline float distanceForDistantExplosion = 100.0f;
 inline float distanceForDistantGunshot = 50.0f;
+inline float stereoAmbienceVol = 0.3f;
 
 inline auto modname = string("EarShot");
 inline auto modMessage = [&](const string& messagetext, UINT messageflags = MB_OK) {
@@ -71,11 +72,6 @@ inline auto caseUpper = [&](string casedstring)
 		}
 		return caseless;
 	};
-
-struct ThrownWeapon {
-	int32_t explosionType;
-	int32_t weaponType;
-};
 
 inline auto nameType = [&](string* weaponname, eWeaponType* weapontype)
 	{
@@ -541,6 +537,3 @@ inline bool NameStartsWithIndexedSuffix(const char* name, const std::string& pre
 	return false;
 }
 
-inline bool AddExplosion(CEntity* victim, CEntity* creator, int32_t explosionType, CVector& posn, unsigned int time, unsigned char makeSound, float camShake, unsigned char visibility) {
-	return plugin::CallAndReturn<bool, 0x736A50>(victim, creator, explosionType, posn, time, makeSound, camShake, visibility);
-}
