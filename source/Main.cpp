@@ -98,11 +98,12 @@ auto __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 	}
 
 	float dist = DistanceBetweenPoints(cameraposition, entity->GetPosition());
+	bool farAway = dist > distanceForDistantGunshot;
 	bool emptyPlayed = false, dryFirePlayed = false;
 	bool alternatePlayed = false;
 
 	// Play low ammo and dryfire sounds
-	if (entity && IsEntityPointerValid(entity) && entity->m_nType == ENTITY_TYPE_PED && weap && info) {
+	if (!farAway && entity && IsEntityPointerValid(entity) && entity->m_nType == ENTITY_TYPE_PED && weap && info) {
 		unsigned int ammo = weap->m_nAmmoInClip;
 		unsigned short ammoClip = info->m_nAmmoClip;
 		int left = (ammoClip / 3);
@@ -118,7 +119,7 @@ auto __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 		}
 	}
 
-	if (dist > distanceForDistantGunshot) {
+	if (farAway) {
 		if (AUDIOCALL(AUDIODISTANT))
 		{
 			alternatePlayed = true;
@@ -1207,10 +1208,10 @@ public:
 								alGetSourcei(inst->source, AL_BUFFER, &buffer);
 								ALint fmt = AudioManager.GetBufferFormat((ALuint)buffer);
 
+								float originalSourceGain = inst->baseGain;
 								float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
 								float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
-								float gain = gameVol * fader;
-
+								float gain = originalSourceGain * gameVol * fader;
 								if ((inst->isAmbience || inst->isManualAmbience) && state == AL_PLAYING && (fmt == AL_FORMAT_STEREO_FLOAT32 || fmt == AL_FORMAT_MONO_FLOAT32))
 								{
 									// They are loud as hell, decrease the gain a bit

@@ -627,8 +627,6 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 		veh = true;
 	}
 
-	float dist = DistanceBetweenPoints(cameraposition, pos);
-
 	ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(audiopath->string().c_str());
 	if (buffer == 0) {
 		Log("Could not play %s", outputPath(audiopath));
@@ -700,9 +698,11 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 
 		float gainMultiplier = 0.1f + (float(left) - ammoInClip) * 0.1f;
 
-		float finalGain = AEAudioHardware.m_fEffectMasterScalingFactor * gainMultiplier;
-		AudioManager.SetSourceGain(inst->source, finalGain);
-		//alSourcef(inst->source, AL_GAIN, finalGain);
+		gain *= gainMultiplier;
+		AudioManager.SetSourceMaxDist(inst->source, 900.0f);
+		AudioManager.SetSourceRefDist(inst->source, 1.0f);
+		AudioManager.SetSourceRolloffFactor(inst->source, 1.5f);
+		AudioManager.SetSourceGain(inst->source, gain);
 	}
 }
 
