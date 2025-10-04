@@ -37,8 +37,6 @@ void CAudioManager::Initialize()
 	Logging = ini.ReadBoolean("MAIN", "Logging", false);
 	maxBytesInLog = (uint64_t)ini.ReadInteger("MAIN", "Max bytes in log", 9000000);
 
-	interiorIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Interior interval min", 5000);
-	interiorIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Interior interval max", 10000);
 	fireIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Ambience interval min", 5000);
 	fireIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Ambience interval max", 10000);
 	zoneIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Zone ambience interval min", 5000);
@@ -135,7 +133,6 @@ void CAudioManager::Shutdown()
 		}
 		inst->isAmbience = false;
 		inst->isGunfireAmbience = false;
-		inst->isInteriorAmbience = false;
 		inst->isPossibleGunFire = false;
 	}
 	audiosplaying.clear();  // Remove all sound instances
@@ -199,7 +196,7 @@ AudioData CAudioManager::DecodeWAV(const std::string& path)
 {
 	drwav wav;
 	if (!drwav_init_file(&wav, path.c_str(), NULL)) {
-		Log("%s: Failed to init WAV", __FUNCTION__);
+		Log("%s: Failed to init WAV %s", __FUNCTION__, path.c_str());
 		return {};
 	}
 
@@ -439,51 +436,32 @@ ALint CAudioManager::GetBufferFormat(ALuint buffer)
 // Used to play 3D sounds in a 3D space.
 // For 2D sounds we use the other func called "PlaySource2D".
 // Note that this plays the sound only ONCE and looping is only done for missiles/fire/minigun barrel here and managed separately.
-// @returns true on success, false otherwise.
-bool CAudioManager::PlaySource(ALuint buff,
-	float maxDist,
-	float gain,
-	float airAbsorption,
-	float refDist,
-	float rollOffFactor, float pitch,
-	CVector pos, bool isFire,
-	CFire* firePtr,
-	int fireEventID, std::shared_ptr<SoundInstance>* outInst,
-	CPhysical* ent, bool isPossibleGunFire,
-	fs::path* path, std::string nameBuff,
-	bool isMinigunBarrelSpin, CPed* shooter, eWeaponType weapType, bool isGunfire,
-	bool isInteriorAmbience, bool isMissile, bool looping, uint32_t delay, bool isAmbience, FxSystem_c* fireFX)
+// @returns shared_ptr of the SoundInstance on success, nullptr otherwise.
+std::shared_ptr<SoundInstance> CAudioManager::PlaySource(ALuint buffer, const SoundInstanceSettings& opts)
 {
-
 	// No point in continuing, there's no valid buffers!
-	if (!alIsBuffer(buff)) return false;
+	if (!alIsBuffer(buffer)) return nullptr;
+
+	ALSourceHandle srcHandle;
+	if (!srcHandle) return nullptr; // failed to create OpenAL source
 
 	auto inst = std::make_shared<SoundInstance>();
-	alGenSources(1, &inst->source);
-	// Is it a valid source?
-	if (!alIsSource(inst->source))
-	{
-		return false;
-	}
-	ALboolean useLooping = AL_FALSE;
-	if (isFire || isMissile || looping)
-	{
-		useLooping = AL_TRUE;
-	}
-	alSourcei(inst->source, AL_BUFFER, buff);
-	alSource3f(inst->source, AL_POSITION, pos.x, pos.y, pos.z);
-	alSourcef(inst->source, AL_GAIN, gain);
-	alSourcef(inst->source, AL_AIR_ABSORPTION_FACTOR, airAbsorption);
-	alSourcef(inst->source, AL_PITCH, pitch);
-	alSourcei(inst->source, AL_LOOPING, useLooping);
-	alSourcef(inst->source, AL_REFERENCE_DISTANCE, refDist);
-	alSourcef(inst->source, AL_MAX_DISTANCE, maxDist);
-	alSourcef(inst->source, AL_ROLLOFF_FACTOR, rollOffFactor);
-	//AttachReverbToSource(inst->source);
-	static uint32_t playStartTime = 0;
+	inst->source = srcHandle.id;
+	srcHandle.id = 0;
 
-	if (ent && ent->m_nType == ENTITY_TYPE_PED) {
-		auto ped = reinterpret_cast<CPed*>(ent);
+	ALboolean useLooping = (opts.isFire || opts.isMissile || opts.looping) ? AL_TRUE : AL_FALSE;
+	alSourcei(inst->source, AL_BUFFER, buffer);
+	alSource3f(inst->source, AL_POSITION, opts.pos.x, opts.pos.y, opts.pos.z);
+	SetSourceGain(inst->source, opts.gain);
+	alSourcef(inst->source, AL_AIR_ABSORPTION_FACTOR, opts.airAbsorption);
+	alSourcef(inst->source, AL_PITCH, opts.pitch);
+	alSourcei(inst->source, AL_LOOPING, useLooping);
+	SetSourceRefDist(inst->source, opts.refDist);
+	SetSourceMaxDist(inst->source, opts.maxDist);
+	SetSourceRolloffFactor(inst->source, opts.rollOffFactor);
+
+	if (opts.entity && opts.entity->m_nType == ENTITY_TYPE_PED) {
+		auto ped = reinterpret_cast<CPed*>(opts.entity);
 		eWeaponType weaponType = ped->m_aWeapons[ped->m_nSelectedWepSlot].m_eWeaponType;
 		CWeaponInfo* weapInfo = CWeaponInfo::GetWeaponInfo(weaponType, WEAPSKILL_STD);
 
@@ -493,8 +471,8 @@ bool CAudioManager::PlaySource(ALuint buff,
 				(anim == ANIM_GROUP_FLAME && weapInfo->m_nWeaponFire == WEAPON_FIRE_INSTANT_HIT));
 
 			if (isMinigun) {
-				if (CTimer::m_snTimeInMilliseconds - playStartTime > delay) {
-					playStartTime = CTimer::m_snTimeInMilliseconds;
+				if (CTimer::m_snTimeInMilliseconds - playStartTime[ped] > opts.delayMs) {
+					playStartTime[ped] = CTimer::m_snTimeInMilliseconds;
 					alSourcePlay(inst->source);
 				}
 			}
@@ -506,71 +484,45 @@ bool CAudioManager::PlaySource(ALuint buff,
 	else {
 		alSourcePlay(inst->source);
 	}
-	if (path && !path->empty()) {
-		inst->path = *path;
-		if (!nameBuff.empty())
-			inst->nameBuffer = nameBuff;
-	}
-	if (!inst->nameBuffer.empty())
-	{
-		inst->name = inst->nameBuffer.c_str();
-	}
-	if (ent && !isFire)
-	{
-		inst->entity = ent;
-	}
-	if (shooter && !isFire)
-	{
-		inst->shooter = shooter;
-	}
-	inst->pos = pos;
-	inst->isPossibleGunFire = isPossibleGunFire;
-	inst->minigunBarrelSpin = isMinigunBarrelSpin;
-	inst->WeaponType = weapType;
-	inst->pos = pos;
-	inst->isAmbience = isAmbience;
-	inst->isGunfireAmbience = isGunfire;
-	inst->isInteriorAmbience = isInteriorAmbience;
-	inst->bIsMissile = isMissile;
-	inst->baseGain = gain;
 
-	if (inst->bIsMissile)
-	{
-		inst->missileSource = inst->source;
-	}
+	// fill SoundInstance
+	if (opts.path) inst->path = *opts.path;
+	if (opts.name) inst->nameBuffer = *opts.name;
+	if (!inst->nameBuffer.empty()) inst->name = inst->nameBuffer.c_str();
 
-	if (!inst->path.empty() && !inst->nameBuffer.empty() && inst->name)
-	{
-		Log("%s: path: %s, nameBuffer: %s, name: %s", __FUNCTION__, inst->path.string().c_str(), inst->nameBuffer.c_str(), inst->name);
-	}
+	inst->entity = opts.entity;
+	inst->shooter = opts.shooter;
+	inst->pos = opts.pos;
+	inst->isPossibleGunFire = opts.isPossibleGunFire;
+	inst->minigunBarrelSpin = opts.isMinigunBarrelSpin;
+	inst->WeaponType = opts.weaponType;
+	inst->isAmbience = opts.isAmbience;
+	inst->isGunfireAmbience = opts.isGunfire;
+	inst->bIsMissile = opts.isMissile;
+	inst->baseGain = opts.gain;
+	if (inst->bIsMissile) inst->missileSource = inst->source;
 
-	if (isFire) {
-		inst->isFire = isFire;
-		inst->fireFX = fireFX;
-		if (firePtr) {
-			inst->firePtr = firePtr;
-			g_Buffers.fireSounds[firePtr] = inst;
+	if (opts.isFire) {
+		inst->isFire = true;
+		inst->fireFX = opts.fireFX;
+		if (opts.firePtr) {
+			inst->firePtr = opts.firePtr;
+			g_Buffers.fireSounds[opts.firePtr] = inst;
 		}
 	}
-	else if (fireEventID != 0) {
-		inst->fireFX = fireFX;
+	else if (opts.fireEventID != 0) {
+		inst->fireFX = opts.fireFX;
 		inst->firePtr = nullptr;
-		g_Buffers.nonFireSounds[fireEventID] = inst;
+		g_Buffers.nonFireSounds[opts.fireEventID] = inst;
 	}
 
-	if (outInst)
-	{
-		*outInst = inst;
-	}
-
-	if (inst)
-	{
-		audiosplaying.push_back(std::move(inst));
-		return true;
-	}
-	return false;
+	audiosplaying.push_back(inst);
+	return inst;
 }
 
+
+// Main weapon sounds handling func
+// TODO: refactor someday, but works fine as is right now
 void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 	//if (!audioentity || !fs::exists(*audiopath)) return;
 	float fallBackPitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
@@ -581,44 +533,41 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 	bool isDistant = (stem == "distant" || NameStartsWithIndexedSuffix(stem.c_str(), "distant"));
 	bool isLowAmmo = (stem == "low_ammo" || NameStartsWithIndexedSuffix(stem.c_str(), "low_ammo"));
 	if (isShoot || isAfter || isDistant) {
-		bool foundPitch = false;
-
-		for (auto& info : weaponNames)
-		{
+		// Look for pitch inside the .earshot file
+		for (auto& info : weaponNames) {
 			fs::path earshotPath = audiopath->parent_path() / info.weapName;
 			earshotPath.replace_extension(modextension);
-
-			//Log("Attempting to read earshot file: %s", earshotPath.string().c_str());
-
-			if (fs::exists(earshotPath)) {
-				std::ifstream pitchFile(earshotPath);
-				if (pitchFile.is_open())
-				{
+			std::string key = earshotPath.string();
+			auto it = s_pitchCache.find(key);
+			if (it == s_pitchCache.end()) {
+				// not cached yet, read it
+				std::optional<float> parsedPitch = std::nullopt;
+				std::ifstream pitchFile(key);
+				if (pitchFile.is_open()) {
 					std::string line;
 					while (std::getline(pitchFile, line)) {
-						Log("Read line: '%s'", line.c_str());
 						if (line.rfind("pitch=", 0) == 0) {
 							try {
-								if (fallBackPitch >= 1.0f) {
-									pitch = std::stof(line.substr(6));
-									Log("Pitch parsed: %.2f", pitch);
-									foundPitch = true;
-								}
+								parsedPitch = std::stof(line.substr(6));
 							}
 							catch (...) {
-								pitch = fallBackPitch;
-								Log("Exception parsing pitch, using fallback");
+								parsedPitch = std::nullopt;
 							}
 							break;
 						}
 					}
 				}
+				it = s_pitchCache.emplace(key, parsedPitch).first;
 			}
 
-			if (foundPitch) break;
+			if (it->second.has_value()) {
+				if (fallBackPitch >= 1.0f) {
+					pitch = *it->second;
+				}
+				break;
+			}
 		}
 	}
-
 
 	CVector pos = audioentity->GetPosition();
 	bool veh = false;
@@ -634,75 +583,93 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 	}
 
 	CPed* ped = (CPed*)audioentity;
-	auto inst = std::make_shared<SoundInstance>();
 
-	// for vehicle guns we make the sound a bit louder by changing it's distance attenuation
 	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
 	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
 
 	float gain = gameVol * fader;
-	AudioManager.PlaySource(buffer, veh ? 125.0f : 100.0f,
-		gain, veh ? 1.5f : 2.5f,
-		veh ? 1.5f : 3.0f, veh ? 0.5f : 1.0f,
-		pitch, pos, false, nullptr, 0, &inst, audioentity,
-		true, audiopath, audiopath->stem().string(), false,
-		nullptr, WEAPONTYPE_UNARMED, false, false, false, false, 40);
-	bool NeedsToBeQuieter = false;
-	bool Reloads = false;
-	bool Distant = false;
-	bool After = false;
+	SoundInstanceSettings opts;
 
-	// Some sounds need to be quieter or louder
-	Reloads = IsMatchingName(inst->nameBuffer.c_str(), { "reload", "reload_one", "reload_two" });
-	Distant = _strcmpi(inst->nameBuffer.c_str(), "distant") == 0 || NameStartsWithIndexedSuffix(inst->name, "distant");
-	After = _strcmpi(inst->name, "after") == 0 || NameStartsWithIndexedSuffix(inst->name, "after");
-	NeedsToBeQuieter = IsMatchingName(inst->name, {
-		"hit", "swing", "stomp", "martial_kick", "martial_punch",
-		"reload", "reload_one", "reload_two"
-		});
+	// for vehicle guns we make the sound a bit louder by changing it's distance attenuation
+	opts.maxDist = veh ? 125.0f : 100.0f;
+	opts.gain = gain;
+	opts.airAbsorption = veh ? 1.5f : 2.5f;
+	opts.refDist = veh ? 1.5f : 3.0f;
+	opts.rollOffFactor = veh ? 0.5f : 1.0f;
+	opts.pitch = pitch;
+	opts.pos = pos;
 
-	// Check indexed variants for quieter sounds
-	if (!NeedsToBeQuieter) {
-		static const std::string prefixes[] = {
-			"swing", "hit", "stomp", "martial_kick", "martial_punch"
-		};
-		for (const auto& prefix : prefixes) {
-			if (NameStartsWithIndexedSuffix(inst->name, prefix)) {
-				NeedsToBeQuieter = true;
-				break;
+	opts.isPossibleGunFire = true;
+
+	opts.entity = audioentity;
+
+	opts.weaponType = ped->GetWeapon() ? ped->GetWeapon()->m_eWeaponType : WEAPONTYPE_UNARMED;
+
+	opts.path = *audiopath;
+	opts.name = audiopath->stem().string();
+
+	// Delay for minigun because of it's fast firerate (TODO: find a better way?)
+	opts.delayMs = 40;
+
+	auto inst = AudioManager.PlaySource(buffer, opts);
+	if (inst) {
+		bool NeedsToBeQuieter = false;
+		bool Reloads = false;
+		//bool Distant = false;
+		//bool After = false;
+
+		// Some sounds need to be quieter or louder
+		Reloads = IsMatchingName(inst->nameBuffer.c_str(), { "reload", "reload_one", "reload_two" });
+		//Distant = _strcmpi(inst->nameBuffer.c_str(), "distant") == 0 || NameStartsWithIndexedSuffix(inst->name, "distant");
+		//After = _strcmpi(inst->name, "after") == 0 || NameStartsWithIndexedSuffix(inst->name, "after");
+		NeedsToBeQuieter = IsMatchingName(inst->name, {
+			"hit", "swing", "stomp", "martial_kick", "martial_punch",
+			"reload", "reload_one", "reload_two"
+			});
+
+		// Check indexed variants for quieter sounds
+		if (!NeedsToBeQuieter) {
+			static const std::string prefixes[] = {
+				"swing", "hit", "stomp", "martial_kick", "martial_punch"
+			};
+			for (const auto& prefix : prefixes) {
+				if (NameStartsWithIndexedSuffix(inst->name, prefix)) {
+					NeedsToBeQuieter = true;
+					break;
+				}
 			}
 		}
-	}
 
-	// Special cases
-	if (Reloads) {
-		AudioManager.SetSourceMaxDist(inst->source, 500.0f);
-		AudioManager.SetSourceRefDist(inst->source, 2.0f);
-		AudioManager.SetSourceRolloffFactor(inst->source, 3.0f);
-	}
-	else if (NeedsToBeQuieter) {
-		AudioManager.SetSourceMaxDist(inst->source, 500.0f);
-		AudioManager.SetSourceRefDist(inst->source, 2.0f);
-	}
-	else if (Distant) {
-		AudioManager.SetSourceMaxDist(inst->source, 300.0f);
-		AudioManager.SetSourceRefDist(inst->source, 3.0f);
-	}
+		// Special cases
+		if (Reloads) {
+			AudioManager.SetSourceMaxDist(inst->source, 500.0f);
+			AudioManager.SetSourceRefDist(inst->source, 2.0f);
+			AudioManager.SetSourceRolloffFactor(inst->source, 3.0f);
+		}
+		else if (NeedsToBeQuieter) {
+			AudioManager.SetSourceMaxDist(inst->source, 500.0f);
+			AudioManager.SetSourceRefDist(inst->source, 2.0f);
+		}
+		else if (isDistant) {
+			AudioManager.SetSourceMaxDist(inst->source, 300.0f);
+			AudioManager.SetSourceRefDist(inst->source, 3.0f);
+		}
 
-	// With each lower ammo in the clip, the sound get's louder
-	if (isLowAmmo && ped && ped->GetWeapon()) {
-		int ammoInClip = ped->GetWeapon()->m_nAmmoInClip;
-		unsigned short ammoClip = CWeaponInfo::GetWeaponInfo(ped->GetWeapon()->m_eWeaponType, WEAPSKILL_STD)->m_nAmmoClip;
-		int left = (ammoClip / 3);
-		ammoInClip = std::max(1, std::min(ammoInClip, left));
+		// With each lower ammo in the clip, the sound get's louder
+		if (isLowAmmo && ped && ped->GetWeapon()) {
+			int ammoInClip = ped->GetWeapon()->m_nAmmoInClip;
+			unsigned short ammoClip = CWeaponInfo::GetWeaponInfo(ped->GetWeapon()->m_eWeaponType, WEAPSKILL_STD)->m_nAmmoClip;
+			int left = (ammoClip / 3);
+			ammoInClip = std::max(1, std::min(ammoInClip, left));
 
-		float gainMultiplier = 0.1f + (float(left) - ammoInClip) * 0.1f;
+			float gainMultiplier = 0.1f + (float(left) - ammoInClip) * 0.1f;
 
-		gain *= gainMultiplier;
-		AudioManager.SetSourceMaxDist(inst->source, 900.0f);
-		AudioManager.SetSourceRefDist(inst->source, 1.0f);
-		AudioManager.SetSourceRolloffFactor(inst->source, 1.5f);
-		AudioManager.SetSourceGain(inst->source, gain);
+			gain *= gainMultiplier;
+			AudioManager.SetSourceMaxDist(inst->source, 900.0f);
+			AudioManager.SetSourceRefDist(inst->source, 1.0f);
+			AudioManager.SetSourceRolloffFactor(inst->source, 1.5f);
+			AudioManager.SetSourceGain(inst->source, gain);
+		}
 	}
 }
 
@@ -725,16 +692,21 @@ bool CAudioManager::findWeapon(eWeaponType* weapontype, eModelID modelid, std::s
 	return it->second.audioPlay(filename, audioentity);
 }
 
-bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire, bool isThunder,
-	bool isInteriorAmbience, bool isManual, float manualMaxDist,
-	float manualRefDist, float manualRollOff, ManualAmbience& ma)
+bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, bool isGunfire, bool isThunder, bool isManual, float manualMaxDist,
+	float manualRefDist, float manualRollOff, float manualAirAbsorption, ManualAmbience& ma)
 {
-	if (buffer == 0 || CCutsceneMgr::ms_running || FrontEndMenuManager.m_bMenuActive /*|| (isGunfire && CWeather::WeatherRegion != WEATHER_REGION_LA)*/) // Don't play during a cutscene or when paused
+	// Don't play when paused or during a cutscene
+	if (buffer == 0
+		|| CCutsceneMgr::ms_running
+		|| FrontEndMenuManager.m_bMenuActive)
 		return false;
+
+	if (!isManual && CGame::currArea > 0)
+		return false;
+
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 	//Log("Ambience pitch: %.2f", pitch);
-	auto inst = std::make_shared<SoundInstance>();
-	CVector pos = GetRandomAmbiencePosition(origin, isThunder, isInteriorAmbience);
+	CVector pos = GetRandomAmbiencePosition(origin, isThunder);
 	float VolumeToUse = AEAudioHardware.m_fEffectMasterScalingFactor * 1.3f;
 	float refDist = 1.0f;
 	if (isGunfire) {
@@ -745,21 +717,30 @@ bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, boo
 	}
 
 	if (isThunder) {
-		refDist = 6.0f;
-	}
-	else if (isInteriorAmbience) {
 		refDist = 15.0f;
 	}
 	else if (isManual) {
 		refDist = manualRefDist;
 	}
 	else {
-		refDist = 5.5f;
+		refDist = 6.5f;
 	}
-	if (AudioManager.PlaySource(buffer, isManual ? manualMaxDist : 250.0f, VolumeToUse, 1.0f, refDist, isManual ? manualRollOff : 1.0f, pitch, isManual ? origin : pos,
-		false, nullptr, 0, &inst, nullptr, false, nullptr, std::string(), false, nullptr, eWeaponType(0), isGunfire, isInteriorAmbience, false, false, 0, isManual ? !ma.allowOtherAmbiences : true))
+	SoundInstanceSettings opts;
+	opts.maxDist = isManual ? manualMaxDist : 250.0f;
+	opts.gain = VolumeToUse;
+	opts.airAbsorption = isManual ? manualAirAbsorption : 1.0f;
+	opts.refDist = refDist;
+	opts.rollOffFactor = isManual ? manualRollOff : 1.0f;
+	opts.pitch = pitch;
+	opts.pos = isManual ? origin : pos;
+
+	opts.isGunfire = isGunfire;
+	opts.isAmbience = isManual ? false : true;
+	auto inst = AudioManager.PlaySource(buffer, opts);
+
+	if (inst)
 	{
-		inst->isManualAmbience = isManual;
+		inst.get()->isManualAmbience = isManual;
 		Log("PlayAmbienceBuffer returned true");
 		return true;
 	}
@@ -767,404 +748,246 @@ bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, boo
 	return false;
 }
 
-bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponType, bool useOldAmbience) {
-	static int prevCurrArea = CGame::currArea; // track area transitions
-	static uint32_t lastPrintedInteriorID = 0;
-	bool isNight = CClock::ms_nGameClockHours >= 20 || CClock::ms_nGameClockHours < 6;
-	bool isRiot = CGameLogic::LaRiotsActiveHere();
-	CVector playerPos = FindPlayerCoors();
+bool CAudioManager::PlayOutsideAmbience(
+	const CVector& playerPos,
+	const CVector& origin,
+	eWeaponType weaponType,
+	bool isNight,
+	bool isRiot,
+	bool ambienceStillPlaying,
+	CZone* zone)
+{
+	// 1) Manual ambiences: stop if left sphere
+	for (auto& ma : g_ManualAmbiences) {
+		bool playerInside = IsPointWithinSphere(ma.sphere, playerPos);
 
-	// --- 0) Detect interior->interior switch (warp while staying inside) ---
-	if (prevCurrArea > 0 && CGame::currArea > 0 && prevCurrArea != CGame::currArea) {
-		// We changed interiors while still "inside" -> stop old interior ambience(s) and allow new to play
-		nextInteriorAmbienceTime = CTimer::m_snTimeInMilliseconds; // allow immediate play
-
-		for (auto& sfx : AudioManager.audiosplaying) {
-			if (!sfx) continue;
-			if (sfx->isInteriorAmbience) {
-				// stop & delete old source to avoid blocking new ambience
-				if (sfx->source != 0) {
-					ALint st = AL_STOPPED;
-					alGetSourcei(sfx->source, AL_SOURCE_STATE, &st);
-					if (st == AL_PLAYING || st == AL_PAUSED) {
-						AudioManager.PauseSource(&*sfx);
-						//alSourceStop(sfx->source);
-					}
-					alDeleteSources(1, &sfx->source);
-					sfx->source = 0;
-				}
-				sfx->isInteriorAmbience = false;
-			}
+		if (ma.loop && ma.loopingInstance && !playerInside) {
+			AudioManager.StopLoopingAmbience(ma);
+			Log("ManualAmbience: stopped looping ambience - player left its range");
 		}
-		// reset last printed so new interior logs immediately
-		lastPrintedInteriorID = 0;
-	}
 
-	// --- 1) Detect leaving/entering interiors and reset timers / cleanup ---
-	if (prevCurrArea > 0 && CGame::currArea <= 0) {
-		// We just left an interior -> clear interior timers and stop any interior ambiences
-		nextInteriorAmbienceTime = 0;
+		if (!playerInside) {
+			for (auto& inst : AudioManager.audiosplaying) {
+				if (!inst) continue;
+				if (!inst->isManualAmbience) continue;
+				if (inst->source == 0) continue;
 
-		for (auto& sfx : AudioManager.audiosplaying) {
-			if (!sfx) continue;
-			if (sfx->isInteriorAmbience) {
-				if (sfx->source != 0) {
-					ALint state = 0;
-					alGetSourcei(sfx->source, AL_SOURCE_STATE, &state);
-					if (state == AL_PLAYING || state == AL_PAUSED) {
-						AudioManager.PauseSource(&*sfx);
-						//alSourceStop(sfx->source);
-					}
-					alDeleteSources(1, &sfx->source);
-					sfx->source = 0;
+				if (!IsPointWithinSphere(ma.sphere, inst->pos)) continue;
+
+				ALint state = AL_STOPPED;
+				if (inst->source != 0) alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
+
+				if (state == AL_PLAYING || state == AL_PAUSED) {
+					AudioManager.PauseSource(&*inst);
+					alSourceStop(inst->source);
 				}
-				sfx->isInteriorAmbience = false;
+
+				alDeleteSources(1, &inst->source);
+				inst->source = 0;
+				ma.nextPlayTime = CTimer::m_snTimeInMilliseconds + ma.delay;
+				Log("ManualAmbience: stopped non-looping manual ambience instance at (%.1f,%.1f,%.1f).",
+					inst->pos.x, inst->pos.y, inst->pos.z);
 			}
 		}
 	}
-	else if (prevCurrArea <= 0 && CGame::currArea > 0) {
-		// We just entered an interior -> allow immediate attempt to play ambience
-		nextInteriorAmbienceTime = CTimer::m_snTimeInMilliseconds;
-	}
-	prevCurrArea = CGame::currArea;
-
-	// --- 2) Check if an ambience is still playing (treat PAUSED as "still playing") ---
-	bool ambienceStillPlaying = false;
-	for (auto& sfx : AudioManager.audiosplaying) {
-		if (!sfx) continue;
-		if (!sfx->isAmbience)
-			continue;
-
-		ALint state = AL_STOPPED;
-		if (sfx->source != 0) {
-			alGetSourcei(sfx->source, AL_SOURCE_STATE, &state);
-		}
-
-		if (state == AL_PLAYING) {
-			ambienceStillPlaying = true;
-			break;
-		}
-
-		// If paused, resume when menu inactive instead of spawning a new ambience.
-		if (state == AL_PAUSED) {
-			if (!FrontEndMenuManager.m_bMenuActive && sfx->source != 0) {
-				AudioManager.ResumeSource(&*sfx);
-				//alSourcePlay(sfx->source);
-			}
-			ambienceStillPlaying = true;
-			break;
-		}
-	}
-
-	if (useOldAmbience) {
-
-		// INSIDE INTERIOR
-		if (CGame::currArea != 0) {  // inside some interior
-			int currInterior = CGame::currArea;
-			CEntryExit* currentEntryExit = nullptr;
-			auto* playa = FindPlayerPed();
-
-			float closestDistSq = FLT_MAX;
-
-			for (int i = 0; i < CEntryExitManager::mp_poolEntryExits->m_nSize; i++) {
-				if (!CEntryExitManager::mp_poolEntryExits->m_byteMap[i].bEmpty) {
-					auto object = CEntryExitManager::mp_poolEntryExits->GetAt(i);
-					if (object && playa->m_nAreaCode == object->m_nArea) {
-						float distSq = DistanceBetweenPoints(playerPos, object->m_vecExitPos);
-						if (distSq < closestDistSq) {
-							closestDistSq = distSq;
-							currentEntryExit = object;
-						}
-					}
-				}
-			}
-
-			if (currentEntryExit && !CEntryExitManager::mp_Active) {
-				if (lastPrintedInteriorID != currentEntryExit->m_nArea) {
-					Log("Current interior ID '%d', interior name '%s'",
-						currentEntryExit->m_nArea, currentEntryExit->m_szName);
-					lastPrintedInteriorID = currentEntryExit->m_nArea;
-				}
-
-				static bool wasPaused = false;
-				if (FrontEndMenuManager.m_bMenuActive) {
-					wasPaused = true;
-					return false;
-				}
-
-				if (wasPaused) {
-					// Reset timers to prevent instant spam after coming back from pause
-					nextInteriorAmbienceTime = CTimer::m_snTimeInMilliseconds + 300;
-					wasPaused = false;
-				}
-
-				if (!ambienceStillPlaying && CTimer::m_snTimeInMilliseconds >= nextInteriorAmbienceTime) {
-					auto it = g_InteriorAmbience.find(currInterior);
-					if (it != g_InteriorAmbience.end() && !it->second.empty()) {
-						// Prepare key
-						std::string zoneKey(currentEntryExit->m_szName);
-						std::transform(zoneKey.begin(), zoneKey.end(), zoneKey.begin(), ::tolower);
-						zoneKey = zoneKey.substr(0, zoneKey.find_first_of(" \t\n\r")); // trim
-
-						// Match sounds for this zoneKey
-						std::vector<const InteriorAmbience*> matchingSounds;
-						for (const auto& sound : it->second) {
-							std::string soundKey = sound.gxtKey;
-							std::transform(soundKey.begin(), soundKey.end(), soundKey.begin(), ::tolower);
-							if (zoneKey == soundKey) {
-								matchingSounds.push_back(&sound);
-							}
-						}
-
-						if (!matchingSounds.empty()) {
-							RandomUnique rnd(matchingSounds.size());
-
-							int index = rnd.next();
-							const InteriorAmbience* chosenSound =
-								matchingSounds[index];
-							ALuint bufferToPlay = 0;
-
-							if (!isNight && chosenSound->bufferDay) {
-								bufferToPlay = chosenSound->bufferDay;
-							}
-							else if (isNight && chosenSound->bufferNight) {
-								bufferToPlay = chosenSound->bufferNight;
-							}
 
 
-							if (PlayAmbienceBuffer(bufferToPlay, origin, false, false, true)) {
-								nextInteriorAmbienceTime = CTimer::m_snTimeInMilliseconds +
-									CGeneral::GetRandomNumberInRange((int)interiorIntervalMin, (int)interiorIntervalMax);
-								return true; // Stop after playing
-							}
-						}
-					}
-				}
-			}
-			else if (CEntryExitManager::mp_Active)
-			{
-				// During entry/exit transitions, ensure interior ambiences are stopped.
-				for (auto& interiorAmbiences : AudioManager.audiosplaying)
-				{
-					if (!interiorAmbiences) continue;
-					ALint state = AL_STOPPED;
-					if (interiorAmbiences->source != 0) {
-						alGetSourcei(interiorAmbiences->source, AL_SOURCE_STATE, &state);
-					}
-					if (interiorAmbiences->isInteriorAmbience && (state == AL_PLAYING || state == AL_PAUSED))
-					{
-						AudioManager.PauseSource(&*interiorAmbiences);
-						//alSourceStop(interiorAmbiences->source);
-						alDeleteSources(1, &interiorAmbiences->source);
-						interiorAmbiences->source = 0;
-						interiorAmbiences->isInteriorAmbience = false;
-					}
-				}
-			}
-		}
-		// --- OUTSIDE (zones / fallback) ---
-		else if (CGame::currArea <= 0) {
-			CZone* zone{};
-			CTheZones::GetZoneInfo(&cameraposition, &zone);
-			// Manual map ambiences
-			bool playedSomething = false; // track if any ambience actually played
+	// 2) Try to play manual ambiences
+	for (auto& ma : g_ManualAmbiences) {
+		if (ma.buffer.empty()) continue;
+		if (ma.time == EAmbienceTime::Night && !isNight) continue;
+		if (ma.time == EAmbienceTime::Riot && !isRiot) continue;
 
-			for (auto& ma : g_ManualAmbiences) {
-				if (!ma.loop) continue;
-				// if there's an active instance, stop it when player left sphere
-				bool hasInstance = (ma.loopingInstance != nullptr);
-				if (hasInstance) {
-					bool inside = IsPointWithinSphere(ma.sphere, playerPos);
-					if (!inside) {
-						AudioManager.StopLoopingAmbience(ma);
-					}
-				}
-			}
+		bool insideRange = IsPointWithinSphere(ma.sphere, playerPos);
 
-			// Stop running looping ambiences if player left their sphere
-			for (auto& ma : g_ManualAmbiences) {
-				if (!ma.loop) continue;
-				if (!ma.loopingInstance) continue;
+		// pick random buffer
+		RandomIntegers id(ma.buffer.size());
+		int idx = id.next();
+		ALuint buff = ma.buffer[idx];
 
-				bool inside = IsPointWithinSphere(ma.sphere, playerPos);
-				if (!inside) {
-					AudioManager.StopLoopingAmbience(ma);
-					Log("ManualAmbience: stopped looping ambience - player left it's range.");
-				}
-			}
-
-			// Try to play manual ambiences
-			for (auto& ma : g_ManualAmbiences) {
-				if (ma.buffer.empty()) continue;
-
-				if (ma.time == EAmbienceTime::Night && !isNight) continue;
-				if (ma.time == EAmbienceTime::Riot && !isRiot) continue;
-
-				bool insideRange = IsPointWithinSphere(ma.sphere, playerPos);
-
-				// pick a random buffer
-				RandomUnique id(ma.buffer.size());
-				int idx = id.next();
-				ALuint buff = ma.buffer[idx];
-
-				// Handle looping ambiences
-				if (ma.loop) {
-					bool hasInstance = (ma.loopingInstance != nullptr);
-
-					if (insideRange) {
-						// start loop if not already running AND (no other ambience is playing OR this manual allows others)
-						if (!hasInstance && (!ambienceStillPlaying || ma.allowOtherAmbiences)) {
-							if (AudioManager.StartLoopingAmbience(ma)) {
-								Log("ManualAmbience: started looping ambience (buffer=%u).", buff);
-								if (!ma.allowOtherAmbiences) {
-									playedSomething = true;
-									return true;
-								}
-							}
-							else {
-								Log("ManualAmbience: StartLoopingAmbience failed for buffer=%u", buff);
-							}
-						}
-						else if (hasInstance) {
-							if (!ma.allowOtherAmbiences) {
-								playedSomething = true;
-								return true;
-							}
+		// Handle looping ambiences (start if not running)
+		if (ma.loop) {
+			bool hasInstance = (ma.loopingInstance != nullptr);
+			if (insideRange) {
+				if (!hasInstance && (!ambienceStillPlaying || ma.allowOtherAmbiences)) {
+					if (AudioManager.StartLoopingAmbience(ma)) {
+						Log("ManualAmbience: started looping ambience (buffer=%u).", buff);
+						if (!ma.allowOtherAmbiences) {
+							return true;
 						}
 					}
 					else {
-						if (hasInstance) {
-							AudioManager.StopLoopingAmbience(ma);
-							Log("ManualAmbience: stopped looping ambience (buffer=%u) - player left range.", buff);
-						}
-					}
-					continue; // next manual ambience
-				}
-
-				// Handle non-looping ambiences
-				if (!ma.loop && CTimer::m_snTimeInMilliseconds >= ma.nextPlayTime) {
-					if (insideRange) {
-						if (!ambienceStillPlaying) {
-							if (PlayAmbienceBuffer(buff, ma.pos, false, false, false, true, ma.maxDist, ma.refDist, ma.rollOff, ma)) {
-								ma.nextPlayTime = CTimer::m_snTimeInMilliseconds + ma.delay;
-								Log("ManualAmbience: played transient buffer=%u, size=%zu", buff, ma.buffer.size());
-								if (!ma.allowOtherAmbiences) {
-									playedSomething = true;
-									return true;
-								}
-							}
-							else {
-								Log("ManualAmbience: PlayAmbienceBuffer returned false for buffer=%u", buff);
-							}
-						}
+						Log("ManualAmbience: StartLoopingAmbience failed for buffer=%u", buff);
 					}
 				}
-			}
-
-			bool zoneHasCustomAmbience = false;
-			if (zone) {
-				std::string zoneKey(zone->m_szTextKey);
-				std::transform(zoneKey.begin(), zoneKey.end(), zoneKey.begin(), ::tolower);
-
-				const auto& buffersMap =
-					isRiot ? g_Buffers.ZoneAmbienceBuffers_Riot :
-					isNight ? g_Buffers.ZoneAmbienceBuffers_Night :
-					g_Buffers.ZoneAmbienceBuffers_Day;
-
-				if (!zoneKey.empty()) {
-					for (const auto& [key, vec] : buffersMap) {
-						if (!vec.empty() && zoneKey.starts_with(key)) {
-							zoneHasCustomAmbience = true;
-							break;
-						}
-					}
-				}
-
-				// First try local zone ambience
-				if (!zoneKey.empty() && !ambienceStillPlaying && CTimer::m_snTimeInMilliseconds >= nextZoneAmbienceTime) {
-					for (const auto& [key, vec] : buffersMap) {
-						if (zoneKey.starts_with(key) && !vec.empty()) {
-							RandomUnique rnd(vec.size());
-
-							int index = rnd.next();
-							ALuint buffer = vec[index];
-							if (PlayAmbienceBuffer(buffer, origin)) {
-								nextZoneAmbienceTime = CTimer::m_snTimeInMilliseconds +
-									CGeneral::GetRandomNumberInRange((int)zoneIntervalMin, (int)zoneIntervalMax);
-								playedSomething = true;
-								//return true;
-								break;
-							}
-						}
-					}
-				}
-			}
-
-			// --- Global zone ambience ---
-			const auto& globalBuffersMap =
-				isRiot ? g_Buffers.GlobalZoneAmbienceBuffers_Riot :
-				isNight ? g_Buffers.GlobalZoneAmbienceBuffers_Night :
-				g_Buffers.GlobalZoneAmbienceBuffers_Day;
-
-			std::string globalKey;
-			//Log("CTheZones::m_CurrLevel: %d", CTheZones::m_CurrLevel);
-			switch (CTheZones::m_CurrLevel) {
-			case LEVEL_NAME_COUNTRY_SIDE: globalKey = "country"; break;
-			case LEVEL_NAME_LOS_SANTOS:   globalKey = "LS"; break;
-			case LEVEL_NAME_SAN_FIERRO:   globalKey = "SF"; break;
-			case LEVEL_NAME_LAS_VENTURAS: globalKey = "LV"; break;
-			default: break;
-			}
-
-			if (!globalKey.empty() && !ambienceStillPlaying && !playedSomething) {
-				if (auto it = globalBuffersMap.find(globalKey); it != globalBuffersMap.end() && !it->second.empty()) {
-					RandomUnique rnd(it->second.size());
-
-					int index = rnd.next();
-					ALuint buffer = it->second[index];
-					if (PlayAmbienceBuffer(buffer, origin)) {
-						nextZoneAmbienceTime = CTimer::m_snTimeInMilliseconds +
-							CGeneral::GetRandomNumberInRange((int)zoneIntervalMin, (int)zoneIntervalMax);
-						playedSomething = true;  // global played
+				else if (hasInstance) {
+					if (!ma.allowOtherAmbiences) {
 						return true;
 					}
 				}
 			}
+			else {
+				if (hasInstance) {
+					AudioManager.StopLoopingAmbience(ma);
+					Log("ManualAmbience: stopped looping ambience (buffer=%u) - player left range.", buff);
+				}
+			}
+			continue; // next manual ambience
+		}
 
-			// --- Fallback riot/day/night/fire ambiences ---
-			if (!ambienceStillPlaying && !zoneHasCustomAmbience && (!playedSomething)) {
-				//	Log("Fallback playedSomething is false");
-				bool fireAmbiencePlaying = std::any_of(AudioManager.audiosplaying.begin(), AudioManager.audiosplaying.end(), [&](const std::shared_ptr<SoundInstance>& sfx) {
-					if (!sfx->isAmbience || sfx->isGunfireAmbience) return false;
-					ALint state = AL_STOPPED;
-					if (sfx->source != 0) alGetSourcei(sfx->source, AL_SOURCE_STATE, &state);
-					return state == AL_PLAYING || state == AL_PAUSED;
-					});
+		// Non-looping manual ambiences
+		if (!ambienceStillPlaying && !ma.loop && CTimer::m_snTimeInMilliseconds >= ma.nextPlayTime) {
+			if (insideRange) {
+				if (PlayAmbienceBuffer(buff, ma.pos, false, false, true, ma.maxDist, ma.refDist, ma.rollOff, ma.airAbsorption, ma)) {
+					ma.nextPlayTime = CTimer::m_snTimeInMilliseconds + ma.delay;
+					Log("CurrentTime=%u, NextPlayTime=%u, Delay=%u",
+						CTimer::m_snTimeInMilliseconds, ma.nextPlayTime, ma.delay);
+					Log("ManualAmbience: played transient buffer=%u, size=%zu, next time is=%u", buff, ma.buffer.size(), ma.nextPlayTime);
+					if (!ma.allowOtherAmbiences) {
+						return true;
+					}
+				}
+				else {
+					Log("ManualAmbience: PlayAmbienceBuffer returned false for buffer=%u", buff);
+				}
+			}
+		}
+	}
 
-				if (!fireAmbiencePlaying && CTimer::m_snTimeInMilliseconds >= nextFireAmbienceTime) {
-					std::vector<ALuint>* selectedBuffs =
-						isRiot && !g_Buffers.RiotAmbienceBuffs.empty() ? &g_Buffers.RiotAmbienceBuffs :
-						isNight && !g_Buffers.NightAmbienceBuffs.empty() ? &g_Buffers.NightAmbienceBuffs :
-						!g_Buffers.AmbienceBuffs.empty() ? &g_Buffers.AmbienceBuffs : nullptr;
+	// 3) local zone ambience (if any)
+	bool zoneHasCustomAmbience = false;
+	if (zone) {
+		std::string zoneKey(zone->m_szTextKey);
+		std::transform(zoneKey.begin(), zoneKey.end(), zoneKey.begin(), ::tolower);
 
-					if (selectedBuffs) {
-						RandomUnique rnd(selectedBuffs->size());
+		const auto& buffersMap =
+			isRiot ? g_Buffers.ZoneAmbienceBuffers_Riot :
+			isNight ? g_Buffers.ZoneAmbienceBuffers_Night :
+			g_Buffers.ZoneAmbienceBuffers_Day;
 
-						int index = rnd.next();
-						ALuint buffer = (*selectedBuffs)[index];
-						if (PlayAmbienceBuffer(buffer, origin)) {
-							nextFireAmbienceTime = CTimer::m_snTimeInMilliseconds +
-								CGeneral::GetRandomNumberInRange((int)fireIntervalMin, (int)fireIntervalMax);
-							return true;
-						}
+		if (!zoneKey.empty()) {
+			for (const auto& [key, vec] : buffersMap) {
+				if (!vec.empty() && zoneKey.starts_with(key)) {
+					zoneHasCustomAmbience = true;
+					break;
+				}
+			}
+		}
+
+		if (!zoneKey.empty() && !ambienceStillPlaying && CTimer::m_snTimeInMilliseconds >= nextZoneAmbienceTime) {
+			for (const auto& [key, vec] : buffersMap) {
+				if (zoneKey.starts_with(key) && !vec.empty()) {
+					RandomIntegers rnd(vec.size());
+					int index = rnd.next();
+					ALuint buffer = vec[index];
+					if (PlayAmbienceBuffer(buffer, origin)) {
+						nextZoneAmbienceTime = CTimer::m_snTimeInMilliseconds +
+							CGeneral::GetRandomNumberInRange((int)zoneIntervalMin, (int)zoneIntervalMax);
+						return true;
 					}
 				}
 			}
 		}
 	}
+
+	// 4) Global zone ambience
+	const auto& globalBuffersMap =
+		isRiot ? g_Buffers.GlobalZoneAmbienceBuffers_Riot :
+		isNight ? g_Buffers.GlobalZoneAmbienceBuffers_Night :
+		g_Buffers.GlobalZoneAmbienceBuffers_Day;
+
+	std::string globalKey;
+	switch (CTheZones::m_CurrLevel) {
+	case LEVEL_NAME_COUNTRY_SIDE: globalKey = "country"; break;
+	case LEVEL_NAME_LOS_SANTOS:   globalKey = "LS"; break;
+	case LEVEL_NAME_SAN_FIERRO:   globalKey = "SF"; break;
+	case LEVEL_NAME_LAS_VENTURAS: globalKey = "LV"; break;
+	default: break;
+	}
+
+	if (!globalKey.empty() && !ambienceStillPlaying) {
+		if (auto it = globalBuffersMap.find(globalKey); it != globalBuffersMap.end() && !it->second.empty()) {
+			RandomIntegers rnd(it->second.size());
+			int index = rnd.next();
+			ALuint buffer = it->second[index];
+			if (PlayAmbienceBuffer(buffer, origin)) {
+				nextZoneAmbienceTime = CTimer::m_snTimeInMilliseconds +
+					CGeneral::GetRandomNumberInRange((int)zoneIntervalMin, (int)zoneIntervalMax);
+				return true;
+			}
+		}
+	}
+
+	// 5) fallback riot/day/night/fire ambiences
+	if (!ambienceStillPlaying && !zoneHasCustomAmbience) {
+		bool fireAmbiencePlaying = std::any_of(AudioManager.audiosplaying.begin(), AudioManager.audiosplaying.end(), [&](const std::shared_ptr<SoundInstance>& sfx) {
+			if (!sfx->isAmbience || sfx->isGunfireAmbience) return false;
+			ALint state = AL_STOPPED;
+			if (sfx->source != 0) alGetSourcei(sfx->source, AL_SOURCE_STATE, &state);
+			return state == AL_PLAYING || state == AL_PAUSED;
+			});
+
+		if (!fireAmbiencePlaying && CTimer::m_snTimeInMilliseconds >= nextFireAmbienceTime) {
+			std::vector<ALuint>* selectedBuffs =
+				isRiot && !g_Buffers.RiotAmbienceBuffs.empty() ? &g_Buffers.RiotAmbienceBuffs :
+				isNight && !g_Buffers.NightAmbienceBuffs.empty() ? &g_Buffers.NightAmbienceBuffs :
+				!g_Buffers.AmbienceBuffs.empty() ? &g_Buffers.AmbienceBuffs : nullptr;
+
+			if (selectedBuffs) {
+				RandomIntegers rnd(selectedBuffs->size());
+				int index = rnd.next();
+				ALuint buffer = (*selectedBuffs)[index];
+				if (PlayAmbienceBuffer(buffer, origin)) {
+					nextFireAmbienceTime = CTimer::m_snTimeInMilliseconds +
+						CGeneral::GetRandomNumberInRange((int)fireIntervalMin, (int)fireIntervalMax);
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponType, bool useOldAmbience) {
+
+	bool isNight = (CClock::ms_nGameClockHours >= 20 || CClock::ms_nGameClockHours < 6);
+	bool isRiot = CGameLogic::LaRiotsActiveHere();
+	CVector playerPos = FindPlayerCoors();
+
+	// Check if an ambience is still playing (treat PAUSED as "still playing") ---
+	bool ambienceStillPlaying = false;
+	for (auto& sfx : AudioManager.audiosplaying) {
+		if (!sfx) continue;
+		if (!sfx->isAmbience && !sfx->isManualAmbience) continue;
+
+		if (sfx->source != 0) {
+			ALint state;
+			alGetSourcei(sfx->source, AL_SOURCE_STATE, &state);
+
+			float gain = 0.0f;
+			alGetSourcef(sfx->source, AL_GAIN, &gain);
+
+			// Only consider as "still playing" if audible
+			if ((state == AL_PLAYING || state == AL_PAUSED) && gain > 0.01f) {
+				ambienceStillPlaying = true;
+				break;
+			}
+		}
+	}
+
+	if (useOldAmbience) {
+		// OUTSIDE (zones / fallback)
+		CZone* zone = nullptr;
+		CTheZones::GetZoneInfo(&cameraposition, &zone);
+
+		if (PlayOutsideAmbience(playerPos, origin, weaponType, isNight, isRiot, ambienceStillPlaying, zone)) {
+			return true;
+		}
+	}
 	else {
 		// LS Gunfire ambience
-		if (/*CWeather::WeatherRegion == WEATHER_REGION_LA && !CEntryExitManager::mp_Active*/ CGame::currArea <= 0) {
+		if (CGame::currArea <= 0) {
 			auto it = g_Buffers.WeaponTypeAmbienceBuffers.find(weaponType);
 			if (it == g_Buffers.WeaponTypeAmbienceBuffers.end() || g_Buffers.WeaponTypeAmbienceBuffers.empty() || it->second == 0)
 				return false;
@@ -1176,7 +999,6 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 	return false;
 }
 
-
 void CAudioManager::UnloadManualAmbiences()
 {
 	for (auto& ma : g_ManualAmbiences) {
@@ -1185,7 +1007,7 @@ void CAudioManager::UnloadManualAmbiences()
 		}
 
 		if (!ma.buffer.empty()) {
-			RandomUnique id(ma.buffer.size());
+			RandomIntegers id(ma.buffer.size());
 
 			int idx = id.next();
 			ALuint buff = ma.buffer[idx];
@@ -1206,43 +1028,29 @@ bool CAudioManager::StartLoopingAmbience(ManualAmbience& ma)
 	if (ma.buffer.empty()) return false;
 	if (ma.loopingInstance) return true; // already running
 
-	// prepare an outInst to receive the created instance from PlaySource
-	std::shared_ptr<SoundInstance> inst;
-	RandomUnique id(ma.buffer.size());
+	RandomIntegers id(ma.buffer.size());
 
 	int idx = id.next();
 	ALuint buff = ma.buffer[idx];
 	float gain = AEAudioHardware.m_fEffectMasterScalingFactor;
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 
-	bool ok = PlaySource(
-		buff,
-		ma.maxDist,
-		gain,
-		1.0f,
-		ma.refDist,
-		ma.rollOff,
-		pitch,
-		ma.pos,
-		false,
-		nullptr,
-		0,
-		&inst,
-		nullptr,
-		false,
-		nullptr,
-		std::string(),
-		false,
-		nullptr,
-		eWeaponType(0),
-		false,
-		false,
-		false,
-		true,
-		0,
-		!ma.allowOtherAmbiences,
-		nullptr
-	);
+	SoundInstanceSettings opts;
+
+	opts.maxDist = ma.maxDist;
+	opts.gain = gain;
+	opts.airAbsorption = ma.airAbsorption;
+	opts.refDist = ma.refDist;
+	opts.rollOffFactor = ma.rollOff;
+	opts.pitch = pitch;
+	opts.pos = ma.pos;
+
+	opts.looping = true;
+	opts.isGunfire = false;
+	opts.isAmbience = !ma.allowOtherAmbiences;
+
+	auto inst = AudioManager.PlaySource(buff, opts);
+	bool ok = (inst != nullptr);
 
 	if (!ok || !inst) {
 		Log("StartLoopingAmbience: PlaySource failed for buffer %u", ma.buffer);
@@ -1286,17 +1094,27 @@ void CAudioManager::PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapont
 	//if (!shooter || !ent) return;
 
 //CPed* ped = reinterpret_cast<CPed*>(shooter);
-	CPlayerPed* playa = reinterpret_cast<CPlayerPed*>(entity);
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 	float deltaTime = CTimer::ms_fTimeStep;
+	eWeaponType weaponType = *weapontype;
 	//	CPed* entity = ped;
-	auto weaponType = entity->m_aWeapons[entity->m_nSelectedWepSlot].m_eWeaponType;
-	auto instance = std::make_shared<SoundInstance>();
 	if (spinning) {
 		// Start playing if not already
 		if (barrelSpinSource == 0) {
-			if (AudioManager.PlaySource(barrelSpinBuffer, FLT_MAX, AEAudioHardware.m_fEffectMasterScalingFactor, 1.0f, 1.0f, 1.0f, pitch, entity->GetPosition(), false, nullptr, 0, &instance, entity,
-				false, nullptr, std::string(), true, entity, weaponType, false, false, false, true))
+			SoundInstanceSettings opts;
+			opts.maxDist = FLT_MAX;
+			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+			opts.pitch = pitch;
+			opts.pos = entity->GetPosition();
+
+			opts.looping = true;
+			opts.isMinigunBarrelSpin = true;
+
+			opts.shooter = entity;
+			opts.weaponType = weaponType;
+
+			auto instance = AudioManager.PlaySource(barrelSpinBuffer, opts);
+			if (instance)
 			{
 				barrelSpinSource = instance->source;
 				Log("Playing spin = true");
@@ -1310,7 +1128,6 @@ void CAudioManager::PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapont
 			barrelSpinVolume += deltaTime / barrelFadeDuration;
 			if (barrelSpinVolume > 1.0f) barrelSpinVolume = 1.0f;
 			AudioManager.SetSourceGain(barrelSpinSource, AEAudioHardware.m_fEffectMasterScalingFactor * barrelSpinVolume);
-			//alSourcef(barrelSpinSource, AL_GAIN, AEAudioHardware.m_fEffectMasterScalingFactor * barrelSpinVolume);
 		}
 	}
 	else {
@@ -1319,10 +1136,9 @@ void CAudioManager::PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapont
 			barrelSpinVolume -= deltaTime / barrelFadeDuration;
 			if (barrelSpinVolume < 0.0f) barrelSpinVolume = 0.0f;
 			AudioManager.SetSourceGain(barrelSpinSource, AEAudioHardware.m_fEffectMasterScalingFactor * barrelSpinVolume);
-			//alSourcef(barrelSpinSource, AL_GAIN, AEAudioHardware.m_fEffectMasterScalingFactor * barrelSpinVolume);
 		}
 
-		// Once volume is faded out, stop source and play SPINEND
+		// Once volume is faded out, stop source and play SPINEND if needed
 		if (barrelSpinVolume <= 0.1f && barrelSpinSource != 0) {
 			if (playSpinEndSFX) {
 				if (AUDIOCALL(AUDIOSPINEND)) {
@@ -1530,7 +1346,7 @@ bool AudioStream::audioPlay(std::string filename, CPhysical* audioEntity)
 	}
 
 	// Play one random alternative sound
-	RandomUnique rnd(alternatives.size());
+	RandomIntegers rnd(alternatives.size());
 
 	int index = rnd.next();
 	fs::path selected = alternatives[index];

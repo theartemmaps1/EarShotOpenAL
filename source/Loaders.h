@@ -38,6 +38,14 @@ struct SoundFile {
 	std::vector<ALuint>& bufferVec;
 };
 
+#ifdef QUAKE_KILLSOUNDS_TEST
+// TODO: variations?
+struct QuakeSound 
+{
+	ALuint headshot;
+};
+#endif
+
 inline std::unordered_map<int, std::vector<InteriorAmbience>> g_InteriorAmbience;
 inline std::vector<WeapInfos> weaponNames;
 inline auto registeredweapons = map<pair<eWeaponType, eModelID>, AudioStream>();

@@ -313,95 +313,6 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 		}
 	}
 
-	// Interior ambience
-	fs::path interiorDir = ambientDir / "interiors";
-	if (fs::exists(interiorDir) && fs::is_directory(interiorDir)) {
-		for (const auto& interiorEntry : fs::directory_iterator(interiorDir)) {
-			if (!interiorEntry.is_directory()) continue;
-			std::string interiorIDStr = interiorEntry.path().filename().string();
-			int interiorID = 0;
-			try { interiorID = std::stoi(interiorIDStr); }
-			catch (...) { Log("Invalid interior folder name (not a number): %s", interiorIDStr.c_str()); continue; }
-
-			for (const auto& nameEntry : fs::directory_iterator(interiorEntry.path())) {
-				if (!nameEntry.is_directory()) continue;
-				std::string gxtKey = nameEntry.path().filename().string();
-				std::transform(gxtKey.begin(), gxtKey.end(), gxtKey.begin(), ::tolower);
-
-				for (int i = 0; i <= 300; ++i) {
-					fs::path chosenDay, chosenNight;
-					fs::path chosenNoIndexDay, chosenNoIndexNight;
-
-					// Look for indexed and non-indexed variants across ALL extensions.
-					// Stop early only when we've found every variant we care about.
-					for (const auto& ext : extensions) {
-						if (chosenDay.empty()) {
-							fs::path p = nameEntry.path() / ("ambience" + std::to_string(i) + ext);
-							if (fs::exists(p)) chosenDay = p;
-						}
-						if (chosenNight.empty()) {
-							fs::path p = nameEntry.path() / ("ambience_night" + std::to_string(i) + ext);
-							if (fs::exists(p)) chosenNight = p;
-						}
-
-						if (chosenNoIndexDay.empty()) {
-							fs::path p = nameEntry.path() / ("ambience" + ext);
-							if (fs::exists(p)) chosenNoIndexDay = p;
-						}
-						if (chosenNoIndexNight.empty()) {
-							fs::path p = nameEntry.path() / ("ambience_night" + ext);
-							if (fs::exists(p)) chosenNoIndexNight = p;
-						}
-
-						// if we've found everything we could possibly want, break early
-						if (!chosenDay.empty() && !chosenNight.empty()
-							&& (i != 0 || (!chosenNoIndexDay.empty() && !chosenNoIndexNight.empty())))
-						{
-							break;
-						}
-					}
-
-					// Now decide which branch to take
-					bool IndexedExists = !chosenDay.empty() || !chosenNight.empty();
-					bool NonIndexExists = !chosenNoIndexDay.empty() || !chosenNoIndexNight.empty();
-
-					if (IndexedExists) {
-						ALuint bufferDay = chosenDay.empty() ? 0 : AudioManager.CreateOpenALBufferFromAudioFile(chosenDay.string().c_str());
-						ALuint bufferNight = chosenNight.empty() ? 0 : AudioManager.CreateOpenALBufferFromAudioFile(chosenNight.string().c_str());
-
-						if (bufferDay || bufferNight) {
-							InteriorAmbience sound{ gxtKey, bufferDay, bufferNight };
-							g_InteriorAmbience[interiorID].push_back(sound);
-							Log("Loaded interior sound for interior ID %d, GXT '%s': day=%s night=%s",
-								interiorID, gxtKey.c_str(),
-								chosenDay.empty() ? "none" : chosenDay.filename().string().c_str(),
-								chosenNight.empty() ? "none" : chosenNight.filename().string().c_str()
-							);
-						}
-					}
-					else if (NonIndexExists) {
-						ALuint bufferDay = chosenNoIndexDay.empty() ? 0 : AudioManager.CreateOpenALBufferFromAudioFile(chosenNoIndexDay.string().c_str());
-						ALuint bufferNight = chosenNoIndexNight.empty() ? 0 : AudioManager.CreateOpenALBufferFromAudioFile(chosenNoIndexNight.string().c_str());
-
-						if (bufferDay || bufferNight) {
-							InteriorAmbience sound{ gxtKey, bufferDay, bufferNight };
-							g_InteriorAmbience[interiorID].push_back(sound);
-							Log("Loaded singular interior sound for interior ID %d, GXT '%s': day=%s night=%s",
-								interiorID, gxtKey.c_str(),
-								chosenNoIndexDay.empty() ? "none" : chosenNoIndexDay.filename().string().c_str(),
-								chosenNoIndexNight.empty() ? "none" : chosenNoIndexNight.filename().string().c_str()
-							);
-						}
-						break;
-					}
-				}
-			}
-		}
-	}
-	else {
-		Log("Interior ambience directory not found: %s", interiorDir.string().c_str());
-	}
-
 	// those two below is for LS gun ambience
 	fs::path pathToGunfireAmbience = foldermod / "generic" / "ambience" / "gunfire";
 	std::vector<std::string> expectedWeapons = { "ak47", "pistol" };
@@ -465,6 +376,7 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 				float maxDist = ini.ReadFloat(section, "Max distance attenuation", 50.0f);
 				float refDist = ini.ReadFloat(section, "Reference distance", 1.0f);
 				float rollOff = ini.ReadFloat(section, "Roll off factor", 1.0f);
+				float airAbsorption = ini.ReadFloat(section, "Air absorption", 1.0f);
 				bool loop = ini.ReadBoolean(section, "Loop", false);
 				bool allow = ini.ReadBoolean(section, "Allow other ambiences", false);
 				uint32_t delay = (uint32_t)ini.ReadInteger(section, "Delay", 30000);
@@ -521,12 +433,13 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 						ma.refDist = refDist;
 						ma.rollOff = rollOff;
 						ma.maxDist = maxDist;
+						ma.airAbsorption = airAbsorption;
 						ma.allowOtherAmbiences = allow;
 
 						g_ManualAmbiences.push_back(ma);
 
-						Log("Loaded manual ambience (section %s): %s @(%.1f, %.1f, %.1f) R=%.1f Loop=%d Time=%s Buffers=%zu",
-							section, files.c_str(), x, y, z, range, loop, timeStr.c_str(), g_ManualAmbiences.back().buffer.size());
+						Log("Loaded manual ambience (section %s): %s @(%.1f, %.1f, %.1f) R=%.1f Loop=%d Time=%s Delay=%d Buffers=%zu",
+							section, files.c_str(), x, y, z, range, loop, timeStr.c_str(), delay, g_ManualAmbiences.back().buffer.size());
 					}
 				}
 			}
@@ -549,7 +462,7 @@ void Loaders::LoadMainWeaponsFolder()
 			if (fileextension == modextension) registerWeapon(entrypath);
 		}
 	}
-	auto registeredtotal = registeredweapons.size();
+	size_t registeredtotal = registeredweapons.size();
 	if (registeredtotal == 0) {
 		initializationstatus = -1;
 		Log("No file(s) found. Stopping work for this session.");
@@ -565,8 +478,6 @@ void Loaders::ReloadAudioFolders()
 	Logging = ini.ReadBoolean("MAIN", "Logging", false);
 	maxBytesInLog = (uint64_t)ini.ReadInteger("MAIN", "Max bytes in log", 9000000);
 
-	interiorIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Interior interval min", 5000);
-	interiorIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Interior interval max", 10000);
 	fireIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Ambience interval min", 5000);
 	fireIntervalMax = (uint32_t)ini.ReadInteger("MAIN", "Ambience interval max", 10000);
 	zoneIntervalMin = (uint32_t)ini.ReadInteger("MAIN", "Zone ambience interval min", 5000);
@@ -604,7 +515,6 @@ void Loaders::ReloadAudioFolders()
 		}
 		inst->isAmbience = false;
 		inst->isGunfireAmbience = false;
-		inst->isInteriorAmbience = false;
 		inst->isPossibleGunFire = false;
 	}
 	AudioManager.audiosplaying.clear();  // Remove all sound instances
@@ -623,6 +533,7 @@ void Loaders::ReloadAudioFolders()
 	DeleteAllBuffers(g_Buffers);
 	registeredweapons.clear();
 	weaponNames.clear();
+	s_pitchCache.clear();
 	AudioManager.UnloadManualAmbiences();
 	// Finally reload all folders
 	LoadExplosionRelatedSounds(foldermod);
@@ -1023,7 +934,7 @@ void Loaders::LoadFireSounds(const fs::path& folder) {
 		}
 	}
 }
-// Copy paste of the previous func
+// Fuck off dirty minded people
 void Loaders::LoadJackingRelatedSounds(const fs::path& folder) {
 	const fs::path jackDir = folder / "generic/jacked";
 	if (!fs::exists(jackDir))

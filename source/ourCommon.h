@@ -32,6 +32,9 @@ inline float distanceForDistantExplosion = 100.0f;
 inline float distanceForDistantGunshot = 50.0f;
 inline float stereoAmbienceVol = 0.3f;
 
+// WIP of my fun idea made out of boredom, define to enable!
+//#define QUAKE_KILLSOUNDS_TEST
+
 inline auto modname = string("EarShot");
 inline auto modMessage = [&](const string& messagetext, UINT messageflags = MB_OK) {
 	if (!Error("%s: %s", modname.c_str(), messagetext.c_str()))
@@ -481,43 +484,28 @@ inline bool IsPointWithinSphere(const CSphere& sphere, const CVector& p) {
 	return SquaredMagnitude(p - sphere.m_vecCenter) <= sq(sphere.m_fRadius);
 }
 
-#include <numeric>   // std::iota
 #include <random>    // std::mt19937, std::random_device
 
-class RandomUnique {
+class RandomIntegers {
 public:
-	RandomUnique(size_t n)
-		: rng(std::random_device{}()), current(0)
-	{
-		reset(n);
-	}
+	int value;  // store the generated random number
 
-	// Reset with new size
-	void reset(size_t n) {
-		indices.resize(n);
-		std::iota(indices.begin(), indices.end(), 0); // fill 0..n-1
-		std::shuffle(indices.begin(), indices.end(), rng);
-		current = 0;
-	}
-
-	// Get next unique number
-	int next() {
-		if (current >= indices.size()) {
-			// auto-reset if exhausted
-			reset(indices.size());
+	RandomIntegers(size_t size) {
+		if (size == 0) {
+			throw std::invalid_argument("Size must be > 0");
 		}
-		return indices[current++];
+
+		static std::random_device rd;
+		static std::mt19937 generator(rd());
+		std::uniform_int_distribution<int> distribution(0, static_cast<int>(size) - 1);
+
+		value = distribution(generator);
 	}
 
-	// Check if we've used all numbers
-	bool empty() const {
-		return current >= indices.size();
+	int next() const
+	{
+		return value;
 	}
-
-private:
-	std::vector<int> indices;
-	size_t current;
-	std::mt19937 rng;
 };
 
 inline bool IsMatchingName(const char* name, std::initializer_list<const char*> values) {
