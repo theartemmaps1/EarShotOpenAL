@@ -544,7 +544,6 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 	bool isAfter = (stem == "after" || NameStartsWithIndexedSuffix(stem.c_str(), "after"));
 	bool isDistant = (stem == "distant" || NameStartsWithIndexedSuffix(stem.c_str(), "distant"));
 	bool isLowAmmo = (stem == "low_ammo" || NameStartsWithIndexedSuffix(stem.c_str(), "low_ammo"));
-	SoundInstanceSettings opts;
 	if (isShoot || isAfter || isDistant) {
 		// Look for pitch inside the .earshot file
 		for (auto& info : weaponNames) {
@@ -603,6 +602,7 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 	float gain = gameVol * fader;
 
 	// for vehicle guns we make the sound a bit louder by changing it's distance attenuation
+	SoundInstanceSettings opts;
 	opts.maxDist = veh ? 125.0f : 100.0f;
 	opts.gain = gain;
 	opts.airAbsorption = veh ? 1.5f : 2.5f;

@@ -1492,10 +1492,9 @@ public:
 									alGetSourcei(inst->source, AL_BUFFER, &buffer);
 									ALint fmt = AudioManager.GetBufferFormat((ALuint)buffer);
 
-									float originalSourceGain = inst->baseGain;
 									float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
 									float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
-									float gain = originalSourceGain * gameVol * fader;
+									float gain = gameVol * fader;
 									if ((inst->isAmbience/* || inst->isManualAmbience*/) && state == AL_PLAYING && (fmt == AL_FORMAT_STEREO_FLOAT32 || fmt == AL_FORMAT_MONO_FLOAT32))
 									{
 										// They are loud as hell, decrease the gain a bit
