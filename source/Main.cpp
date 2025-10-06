@@ -681,13 +681,6 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 
-	auto GetSourceState = [&](ALuint src) -> int {
-		if (src == 0) return -1;
-		ALint state = 0;
-		alGetSourcei(src, AL_SOURCE_STATE, &state);
-		return state;
-		};
-
 	auto SafeDeleteInstanceSource = [&](std::shared_ptr<SoundInstance> inst) {
 		if (!inst) return;
 		if (inst->source != 0) {
@@ -709,7 +702,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		auto inst = it->second;
 		if (!inst) { g_Buffers.nonFireSounds.erase(it); return false; }
 
-		int state = GetSourceState(inst->source);
+		int state = AudioManager.GetSourceState(inst->source);
 		if (state == AL_STOPPED || state == -1) {
 			SafeDeleteInstanceSource(inst);
 			g_Buffers.nonFireSounds.erase(it);
@@ -732,7 +725,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 			return nullptr;
 		}
 
-		int state = GetSourceState(inst->source);
+		ALint state = AudioManager.GetSourceState(inst->source);
 		if (state == AL_STOPPED || state == -1) {
 			SafeDeleteInstanceSource(inst);
 			g_Buffers.fireSounds.erase(it);
@@ -756,7 +749,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 			if (inst && inst->source != 0) {
 				alSource3f(inst->source, AL_POSITION, position.x, position.y, position.z);
 
-				int state = GetSourceState(inst->source);
+				ALint state = AudioManager.GetSourceState(inst->source);
 				if (state == AL_PAUSED) {
 					if (inst->paused) {
 						AudioManager.ResumeSource(inst.get());
@@ -801,7 +794,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		if (inst) {
 			if (inst->source != 0) {
 				alSource3f(inst->source, AL_POSITION, pos.x, pos.y, pos.z);
-				int state = GetSourceState(inst->source);
+				ALint state = AudioManager.GetSourceState(inst->source);
 
 				if (state == AL_PAUSED) {
 					if (inst->paused) AudioManager.ResumeSource(inst.get());
@@ -1470,101 +1463,104 @@ public:
 						subhook_install(subhookCExplosion__AddExplosion);
 						subhook_install(subhookCAudioEngine__ReportFrontEndAudioEvent);
 						//subhook_install(subhookReportCollision);
-						Events::gameProcessEvent += [] {
-							for (auto& inst : AudioManager.audiosplaying)
+						Events::gameProcessEvent += [] 
 							{
-								// This gave me PTSD, it created one bug to another, and i managed to get it fixed
-								// So i prefer to not touch it anymore and leave it as it is
-								if (inst->source == barrelSpinSource && inst->shooter && inst->minigunBarrelSpin)
+								float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+								for (auto& inst : AudioManager.audiosplaying)
 								{
-									ALint spinState;
-									alGetSourcei(inst->source, AL_SOURCE_STATE, &spinState);
-									eWeaponType weaponType = inst->shooter->m_aWeapons[inst->shooter->m_nSelectedWepSlot].m_eWeaponType;
-									CTaskSimpleUseGun* shooting = inst->shooter->m_pIntelligence->GetTaskUseGun();
-									bool gunTaskFinished = shooting && shooting->m_bIsFinished;
-									bool shouldStop = (weaponType != inst->WeaponType || (gunTaskFinished) || inst->shooter->m_ePedState == PEDSTATE_DEAD || inst->shooter->m_fHealth <= 0.0f);
-									if (spinState == AL_PLAYING && shouldStop)
+									// This gave me PTSD, it created one bug to another, and i managed to get it fixed
+									// So i prefer to not touch it anymore and leave it as it is
+									if (inst->source == barrelSpinSource && inst->shooter && inst->minigunBarrelSpin)
 									{
-										//	inst->shooter->m_weaponAudio.PlayMiniGunStopSound(inst->shooter);
-										AudioManager.PlayOrStopBarrelSpinSound(inst->shooter, &weaponType, false, gunTaskFinished ? true : false);
-										//	Log("Gargle");
-									}
-								}
-								// We update each source's gain so when the screen fades, the sound can fade smoothly as well
-								ALint state;
-								alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
-								ALint buffer;
-								alGetSourcei(inst->source, AL_BUFFER, &buffer);
-								ALint fmt = AudioManager.GetBufferFormat((ALuint)buffer);
-
-								float originalSourceGain = inst->baseGain;
-								float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
-								float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
-								float gain = originalSourceGain * gameVol * fader;
-								if ((inst->isAmbience/* || inst->isManualAmbience*/) && state == AL_PLAYING && (fmt == AL_FORMAT_STEREO_FLOAT32 || fmt == AL_FORMAT_MONO_FLOAT32))
-								{
-									// They are loud as hell, decrease the gain a bit
-									if (fmt == AL_FORMAT_STEREO_FLOAT32) {
-										alSourcei(inst->source, AL_SOURCE_RELATIVE, AL_TRUE);
-										alSource3f(inst->source, AL_POSITION, 0.0f, 0.0f, 0.0f);
-										gain *= stereoAmbienceVol;
-									}
-
-									if (CCutsceneMgr::ms_running || CGame::currArea > 0)
-										gain = 0.0f; // mute to not interrupt anything
-
-									AudioManager.SetSourceGain(inst->source, gain);
-								}
-								else if (state == AL_PLAYING)
-								{
-									AudioManager.SetSourceGain(inst->source, gain);
-								}
-								// Doppler effect (never for ambience sounds tho)
-								// Cut cuz useless
-								if (inst->bIsMissile && inst->source == inst->missileSource) {
-									static CVector prevPos = *TheCamera.GetGameCamPosition();
-									static CVector smoothedVel{ 0.0f, 0.0f, 0.0f };
-									static bool prevSkipFrame = false;
-
-									bool skipFrame = TheCamera.m_bJust_Switched || TheCamera.m_bCameraJustRestored || CPad::GetPad(0)->JustOutOfFrontEnd;
-									CVector position = *TheCamera.GetGameCamPosition();
-
-									float timeStep = 0.001f * (CTimer::m_snTimeInMillisecondsNonClipped - CTimer::m_snPreviousTimeInMillisecondsNonClipped);
-
-									if (!skipFrame && timeStep > 0.0001f) {
-										CVector vel = (position - prevPos) / timeStep;
-
-										if (!prevSkipFrame) {
-											smoothedVel = (smoothedVel * 2.0f + vel) / 3.0f;
+										ALint spinState;
+										spinState = AudioManager.GetSourceState(inst->source);
+										eWeaponType weaponType = inst->shooter->m_aWeapons[inst->shooter->m_nSelectedWepSlot].m_eWeaponType;
+										CTaskSimpleUseGun* shooting = inst->shooter->m_pIntelligence->GetTaskUseGun();
+										bool gunTaskFinished = shooting && shooting->m_bIsFinished;
+										bool shouldStop = (weaponType != inst->WeaponType || (gunTaskFinished) || inst->shooter->m_ePedState == PEDSTATE_DEAD || inst->shooter->m_fHealth <= 0.0f);
+										if (spinState == AL_PLAYING && shouldStop)
+										{
+											//	inst->shooter->m_weaponAudio.PlayMiniGunStopSound(inst->shooter);
+											AudioManager.PlayOrStopBarrelSpinSound(inst->shooter, &weaponType, false, gunTaskFinished ? true : false);
+											//	Log("Gargle");
 										}
-										else {
-											smoothedVel = vel;
+									}
+									// We update each source's gain so when the screen fades, the sound can fade smoothly as well
+									ALint state;
+									state = AudioManager.GetSourceState(inst->source);
+									ALint buffer;
+									alGetSourcei(inst->source, AL_BUFFER, &buffer);
+									ALint fmt = AudioManager.GetBufferFormat((ALuint)buffer);
+
+									float originalSourceGain = inst->baseGain;
+									float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+									float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+									float gain = originalSourceGain * gameVol * fader;
+									if ((inst->isAmbience/* || inst->isManualAmbience*/) && state == AL_PLAYING && (fmt == AL_FORMAT_STEREO_FLOAT32 || fmt == AL_FORMAT_MONO_FLOAT32))
+									{
+										// They are loud as hell, decrease the gain a bit
+										if (fmt == AL_FORMAT_STEREO_FLOAT32) {
+											alSourcei(inst->source, AL_SOURCE_RELATIVE, AL_TRUE);
+											alSource3f(inst->source, AL_POSITION, 0.0f, 0.0f, 0.0f);
+											gain *= stereoAmbienceVol;
 										}
-										alListener3f(AL_VELOCITY, smoothedVel.x, smoothedVel.y, smoothedVel.z);
+
+										if (CCutsceneMgr::ms_running || CGame::currArea > 0)
+											gain = 0.0f; // mute to not interrupt anything
+
+										AudioManager.SetSourceGain(inst->source, gain);
+									}
+									else if (state == AL_PLAYING)
+									{
+										AudioManager.SetSourceGain(inst->source, gain);
 									}
 
-									prevPos = position;
-									prevSkipFrame = skipFrame;
-								}
-								else {
-									alListener3f(AL_VELOCITY, 0.0f, 0.0f, 0.0f);
-								}
+									// Doppler effect (never for ambience sounds tho)
+									// Cut cuz useless
+									if (inst->bIsMissile && inst->source == inst->missileSource) {
+										static CVector prevPos = *TheCamera.GetGameCamPosition();
+										static CVector smoothedVel{ 0.0f, 0.0f, 0.0f };
+										static bool prevSkipFrame = false;
 
-								// Pause audio's when it's time to do so
-								bool shouldPause = FrontEndMenuManager.m_bMenuActive ||
-									CTimer::m_UserPause ||
-									CTimer::m_CodePause ||
-									CTimer::ms_fTimeScale <= 0.0f;
-								if (shouldPause)
-								{
-									AudioManager.PauseSource(inst.get());
+										bool skipFrame = TheCamera.m_bJust_Switched || TheCamera.m_bCameraJustRestored || CPad::GetPad(0)->JustOutOfFrontEnd;
+										CVector position = *TheCamera.GetGameCamPosition();
+
+										float timeStep = 0.001f * (CTimer::m_snTimeInMillisecondsNonClipped - CTimer::m_snPreviousTimeInMillisecondsNonClipped);
+
+										if (!skipFrame && timeStep > 0.0001f) {
+											CVector vel = (position - prevPos) / timeStep;
+
+											if (!prevSkipFrame) {
+												smoothedVel = (smoothedVel * 2.0f + vel) / 3.0f;
+											}
+											else {
+												smoothedVel = vel;
+											}
+											alListener3f(AL_VELOCITY, smoothedVel.x, smoothedVel.y, smoothedVel.z);
+										}
+
+										prevPos = position;
+										prevSkipFrame = skipFrame;
+									}
+									else {
+										alListener3f(AL_VELOCITY, 0.0f, 0.0f, 0.0f);
+									}
+
+									// Pause audio's when it's time to do so
+									bool shouldPause = FrontEndMenuManager.m_bMenuActive ||
+										CTimer::m_UserPause ||
+										CTimer::m_CodePause ||
+										CTimer::ms_fTimeScale <= 0.0f;
+									if (shouldPause)
+									{
+										AudioManager.PauseSource(inst.get());
+									}
+									else
+									{
+										AudioManager.ResumeSource(inst.get());
+									}
+									AudioManager.AttachReverbToSource(inst.get()->source);
 								}
-								else
-								{
-									AudioManager.ResumeSource(inst.get());
-								}
-								AudioManager.AttachReverbToSource(inst.get()->source);
-							}
 							};
 					}
 					// The listener is the player, set appropriate values...
@@ -1577,12 +1573,13 @@ public:
 					TheCamera.GetMatrix()->GetForward().x, TheCamera.GetMatrix()->GetForward().y, TheCamera.GetMatrix()->GetForward().z, // forward vector
 					TheCamera.GetMatrix()->GetUp().x, TheCamera.GetMatrix()->GetUp().y,  TheCamera.GetMatrix()->GetUp().z // up vector
 					};
-					alListenerfv(AL_ORIENTATION, orientation);
 
+					alListenerfv(AL_ORIENTATION, orientation);
 					AudioManager.audiosplaying.erase(remove_if(AudioManager.audiosplaying.begin(), AudioManager.audiosplaying.end(),
 						[&](const std::shared_ptr<SoundInstance>& inst) {
+							float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 							ALint state;
-							alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
+							state = AudioManager.GetSourceState(inst->source);
 							// Update missile sound position and velocity
 							if (!inst->isFire && (!inst->firePtr || !inst->fireFX) && state == AL_PLAYING)
 							{

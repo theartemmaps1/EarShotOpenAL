@@ -122,9 +122,10 @@ struct ManualAmbience {
 	float rollOff;
 	float airAbsorption;
 	bool allowOtherAmbiences;
+	ALuint source;
 	ManualAmbience()
 		: pos{ 0.0f,0.0f,0.0f }, range(50.0f), loop(false), allowOtherAmbiences(true), loopingInstance(nullptr), time(EAmbienceTime::Any), delay(3000), nextPlayTime(0),
-		maxDist(50.0f), refDist(1.0f), rollOff(1.0f), airAbsorption(1.0f)
+		maxDist(50.0f), refDist(1.0f), rollOff(1.0f), airAbsorption(1.0f), source(0)
 	{
 		sphere.Set(range, pos);
 	}
@@ -163,7 +164,6 @@ public:
 	static map<string, ALuint> gBufferMap;
 	// Main array to manage ALL currently playing sounds
 	static std::vector<std::shared_ptr<SoundInstance>> audiosplaying;
-
 	// WAV buffer storage
 
 	void Initialize();
@@ -175,6 +175,7 @@ public:
 	bool SetSourceMaxDist(ALuint source, float maxDist);
 	bool SetSourceRefDist(ALuint source, float ref);
 	bool SetSourceRolloffFactor(ALuint source, float factor);
+	bool SetSourcePitch(ALuint source, float pitch);
 	bool PlaySource2D(ALuint buff, bool relative, float volume, float pitch);
 	void PauseSource(SoundInstance* inst);
 	void ResumeSource(SoundInstance* inst);
@@ -204,6 +205,7 @@ public:
 	bool PlayAmbienceSFX(const CVector& origin, eWeaponType weaponType, bool useOldAmbience);
 	void PlayOrStopBarrelSpinSound(CPed* entity, eWeaponType* weapontype, bool spinning, bool playSpinEndSFX = false);
 	ALint GetBufferFormat(ALuint buffer);
+	ALint GetSourceState(ALuint source);
 
 	ALCcontext* GetContext()
 	{

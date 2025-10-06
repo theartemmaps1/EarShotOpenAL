@@ -429,7 +429,18 @@ ALint CAudioManager::GetBufferFormat(ALuint buffer)
 	else {
 		return -1;
 	}
+}
 
+// Get the sources current state
+ALint CAudioManager::GetSourceState(ALuint source)
+{
+	if (!alIsSource(source))
+		return -1;
+
+	ALint state = 0;
+	alGetSourcei(source, AL_SOURCE_STATE, &state);
+	//Log("%s: Source state: %d", __FUNCTION__, state);
+	return state;
 }
 
 // To avoid constant OpenAL blocks, we use this func for everything.
@@ -454,7 +465,7 @@ std::shared_ptr<SoundInstance> CAudioManager::PlaySource(ALuint buffer, const So
 	alSource3f(inst->source, AL_POSITION, opts.pos.x, opts.pos.y, opts.pos.z);
 	SetSourceGain(inst->source, opts.gain);
 	alSourcef(inst->source, AL_AIR_ABSORPTION_FACTOR, opts.airAbsorption);
-	alSourcef(inst->source, AL_PITCH, opts.pitch);
+	SetSourcePitch(inst->source, opts.pitch);
 	alSourcei(inst->source, AL_LOOPING, useLooping);
 	SetSourceRefDist(inst->source, opts.refDist);
 	SetSourceMaxDist(inst->source, opts.maxDist);
@@ -500,6 +511,7 @@ std::shared_ptr<SoundInstance> CAudioManager::PlaySource(ALuint buffer, const So
 	inst->isGunfireAmbience = opts.isGunfire;
 	inst->bIsMissile = opts.isMissile;
 	inst->baseGain = opts.gain;
+
 	if (inst->bIsMissile) inst->missileSource = inst->source;
 
 	if (opts.isFire) {
@@ -532,6 +544,7 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 	bool isAfter = (stem == "after" || NameStartsWithIndexedSuffix(stem.c_str(), "after"));
 	bool isDistant = (stem == "distant" || NameStartsWithIndexedSuffix(stem.c_str(), "distant"));
 	bool isLowAmmo = (stem == "low_ammo" || NameStartsWithIndexedSuffix(stem.c_str(), "low_ammo"));
+	SoundInstanceSettings opts;
 	if (isShoot || isAfter || isDistant) {
 		// Look for pitch inside the .earshot file
 		for (auto& info : weaponNames) {
@@ -578,7 +591,7 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 
 	ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(audiopath->string().c_str());
 	if (buffer == 0) {
-		Log("Could not play %s", outputPath(audiopath));
+		Log("Could not play %s", outputPath(audiopath).c_str());
 		return;
 	}
 
@@ -588,7 +601,6 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
 
 	float gain = gameVol * fader;
-	SoundInstanceSettings opts;
 
 	// for vehicle guns we make the sound a bit louder by changing it's distance attenuation
 	opts.maxDist = veh ? 125.0f : 100.0f;
@@ -615,13 +627,9 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 	if (inst) {
 		bool NeedsToBeQuieter = false;
 		bool Reloads = false;
-		//bool Distant = false;
-		//bool After = false;
 
 		// Some sounds need to be quieter or louder
 		Reloads = IsMatchingName(inst->nameBuffer.c_str(), { "reload", "reload_one", "reload_two" });
-		//Distant = _strcmpi(inst->nameBuffer.c_str(), "distant") == 0 || NameStartsWithIndexedSuffix(inst->name, "distant");
-		//After = _strcmpi(inst->name, "after") == 0 || NameStartsWithIndexedSuffix(inst->name, "after");
 		NeedsToBeQuieter = IsMatchingName(inst->name, {
 			"hit", "swing", "stomp", "martial_kick", "martial_punch",
 			"reload", "reload_one", "reload_two"
@@ -740,7 +748,8 @@ bool CAudioManager::PlayAmbienceBuffer(ALuint buffer, const CVector& origin, boo
 
 	if (inst)
 	{
-		inst.get()->isManualAmbience = isManual;
+		inst->isManualAmbience = isManual;
+		ma.source = inst->source;
 		Log("PlayAmbienceBuffer returned true");
 		return true;
 	}
@@ -757,6 +766,17 @@ bool CAudioManager::PlayOutsideAmbience(
 	bool ambienceStillPlaying,
 	CZone* zone)
 {
+
+	// BEFORE step 1) Manual ambiences: stop if left sphere
+	bool inManualArea = false;
+	for (const auto& ma : g_ManualAmbiences) {
+		if (ma.buffer.empty()) continue;
+		if (!ma.allowOtherAmbiences && IsPointWithinSphere(ma.sphere, playerPos)) {
+			inManualArea = true;
+			break;
+		}
+	}
+
 	// 1) Manual ambiences: stop if left sphere
 	for (auto& ma : g_ManualAmbiences) {
 		bool playerInside = IsPointWithinSphere(ma.sphere, playerPos);
@@ -775,7 +795,7 @@ bool CAudioManager::PlayOutsideAmbience(
 				if (!IsPointWithinSphere(ma.sphere, inst->pos)) continue;
 
 				ALint state = AL_STOPPED;
-				if (inst->source != 0) alGetSourcei(inst->source, AL_SOURCE_STATE, &state);
+				if (inst->source != 0) state = GetSourceState(inst->source);
 
 				if (state == AL_PLAYING || state == AL_PAUSED) {
 					AudioManager.PauseSource(&*inst);
@@ -836,8 +856,38 @@ bool CAudioManager::PlayOutsideAmbience(
 		}
 
 		// Non-looping manual ambiences
-		if (!ambienceStillPlaying && !ma.loop && CTimer::m_snTimeInMilliseconds >= ma.nextPlayTime) {
+		// If the allowOtherAmbiences is true, then allow others to play as well (non manual ambiences)
+		if ((!ambienceStillPlaying || ma.allowOtherAmbiences) && !ma.loop && CTimer::m_snTimeInMilliseconds >= ma.nextPlayTime) {
 			if (insideRange) {
+				// prevent overlapping instances of the same manual ambience
+				// If there's already a manual-ambience instance within this manual ambience's sphere
+				// that is PLAYING or PAUSED, don't start another one.
+				// looping ambience doesn't need this, since it's looped and not a one-shot :shrug:
+				bool instanceAlreadyActive = false;
+				for (auto& inst : AudioManager.audiosplaying) {
+					if (!inst) continue;
+					if (!inst->isManualAmbience) continue;
+					if (inst->source == 0) continue;
+					if (!IsPointWithinSphere(ma.sphere, inst->pos)) continue;
+
+					ALint state = AL_STOPPED;
+					state = GetSourceState(inst->source);
+
+					if (state == AL_PLAYING || state == AL_PAUSED) {
+						instanceAlreadyActive = true;
+						break;
+					}
+				}
+
+				if (instanceAlreadyActive) {
+					continue;
+				}
+
+				// pick random buffer
+				RandomIntegers id(ma.buffer.size());
+				int idx = id.next();
+				ALuint buff = ma.buffer[idx];
+
 				if (PlayAmbienceBuffer(buff, ma.pos, false, false, true, ma.maxDist, ma.refDist, ma.rollOff, ma.airAbsorption, ma)) {
 					ma.nextPlayTime = CTimer::m_snTimeInMilliseconds + ma.delay;
 					Log("CurrentTime=%u, NextPlayTime=%u, Delay=%u",
@@ -852,6 +902,7 @@ bool CAudioManager::PlayOutsideAmbience(
 				}
 			}
 		}
+
 	}
 
 	// 3) local zone ambience (if any)
@@ -874,7 +925,7 @@ bool CAudioManager::PlayOutsideAmbience(
 			}
 		}
 
-		if (!zoneKey.empty() && !ambienceStillPlaying && CTimer::m_snTimeInMilliseconds >= nextZoneAmbienceTime) {
+		if (!zoneKey.empty() && !ambienceStillPlaying && !inManualArea && CTimer::m_snTimeInMilliseconds >= nextZoneAmbienceTime) {
 			for (const auto& [key, vec] : buffersMap) {
 				if (zoneKey.starts_with(key) && !vec.empty()) {
 					RandomIntegers rnd(vec.size());
@@ -905,7 +956,7 @@ bool CAudioManager::PlayOutsideAmbience(
 	default: break;
 	}
 
-	if (!globalKey.empty() && !ambienceStillPlaying) {
+	if (!globalKey.empty() && !ambienceStillPlaying && !inManualArea) {
 		if (auto it = globalBuffersMap.find(globalKey); it != globalBuffersMap.end() && !it->second.empty()) {
 			RandomIntegers rnd(it->second.size());
 			int index = rnd.next();
@@ -919,7 +970,7 @@ bool CAudioManager::PlayOutsideAmbience(
 	}
 
 	// 5) fallback riot/day/night/fire ambiences
-	if (!ambienceStillPlaying && !zoneHasCustomAmbience) {
+	if (!ambienceStillPlaying && !zoneHasCustomAmbience && !inManualArea) {
 		bool fireAmbiencePlaying = std::any_of(AudioManager.audiosplaying.begin(), AudioManager.audiosplaying.end(), [&](const std::shared_ptr<SoundInstance>& sfx) {
 			if (!sfx->isAmbience || sfx->isGunfireAmbience) return false;
 			ALint state = AL_STOPPED;
@@ -959,17 +1010,17 @@ bool CAudioManager::PlayAmbienceSFX(const CVector& origin, eWeaponType weaponTyp
 	bool ambienceStillPlaying = false;
 	for (auto& sfx : AudioManager.audiosplaying) {
 		if (!sfx) continue;
-		if (!sfx->isAmbience && !sfx->isManualAmbience) continue;
+		if (!sfx->isAmbience) continue;
 
 		if (sfx->source != 0) {
 			ALint state;
-			alGetSourcei(sfx->source, AL_SOURCE_STATE, &state);
+			state = GetSourceState(sfx->source);
 
 			float gain = 0.0f;
 			alGetSourcef(sfx->source, AL_GAIN, &gain);
 
 			// Only consider as "still playing" if audible
-			if ((state == AL_PLAYING || state == AL_PAUSED) && gain > 0.01f) {
+			if ((state == AL_PLAYING || state == AL_PAUSED) && gain > 0.0f) {
 				ambienceStillPlaying = true;
 				break;
 			}
@@ -1223,8 +1274,8 @@ bool CAudioManager::PlaySource2D(ALuint buff, bool relative, float volume, float
 	}
 	alSourcei(inst->source, AL_BUFFER, buff);
 	alSourcei(inst->source, AL_SOURCE_RELATIVE, relative);
-	alSourcef(inst->source, AL_GAIN, volume);
-	alSourcef(inst->source, AL_PITCH, pitch);
+	SetSourceGain(inst->source, volume);
+	SetSourcePitch(inst->source, pitch);
 	alSourcePlay(inst->source);
 	AudioManager.audiosplaying.push_back(inst);
 	return true;
@@ -1235,6 +1286,14 @@ bool CAudioManager::SetSourceGain(ALuint source, float gain)
 	// Is it a valid source?
 	if (!alIsSource(source)) return false;
 	alSourcef(source, AL_GAIN, gain);
+	return true;
+}
+
+bool CAudioManager::SetSourcePitch(ALuint source, float pitch)
+{
+	// Is it a valid source?
+	if (!alIsSource(source)) return false;
+	alSourcef(source, AL_PITCH, pitch);
 	return true;
 }
 
@@ -1266,7 +1325,7 @@ bool AudioStream::audioPath(std::string filename, fs::path& outPath)
 {
 	const fs::path filePath(filename);
 
-	// If caller provided an absolute path, check it first
+	// If provided an absolute path, check it first
 	if (filePath.is_absolute()) {
 		if (fs::exists(filePath)) {
 			outPath = filePath;
@@ -1304,7 +1363,7 @@ bool AudioStream::audioPlay(std::string filename, CPhysical* audioEntity)
 		std::string altName = baseName + std::to_string(i);
 		fs::path altPath;
 		if (audioPath(altName, altPath) /*&& fs::exists(altPath)*/) {
-			alternatives.push_back(std::move(altPath));
+			alternatives.push_back(altPath);
 			Log("Alternative audio found: %s", alternatives.back().string().c_str());
 		}
 		else {
@@ -1318,8 +1377,8 @@ bool AudioStream::audioPlay(std::string filename, CPhysical* audioEntity)
 		if (audioPath(baseName, fallbackPath)/* && fs::exists(fallbackPath)*/) {
 			auto inst = std::make_shared<SoundInstance>();
 			inst->path = fallbackPath;
-			alternatives.push_back(std::move(fallbackPath));
-			AudioManager.audiosplaying.push_back(std::move(inst));
+			alternatives.push_back(fallbackPath);
+			AudioManager.audiosplaying.push_back(inst);
 			Log("Fallback audio found: %s", alternatives.back().string().c_str());
 		}
 	}
@@ -1401,7 +1460,7 @@ void CAudioManager::UpdateFireSoundCleanup()
 	for (auto nsIt = g_Buffers.nonFireSounds.begin(); nsIt != g_Buffers.nonFireSounds.end(); ++nsIt) {
 		auto inst = nsIt->second.get();
 		if (inst && inst->source) {
-			alSourcef(inst->source, AL_PITCH, pitch);
+			SetSourcePitch(inst->source, pitch);
 		}
 	}
 
@@ -1420,7 +1479,7 @@ void CAudioManager::UpdateFireSoundCleanup()
 			auto& inst = it->second;
 			if (inst && inst->source)
 			{
-				alSourcef(inst->source, AL_PITCH, pitch);
+				SetSourcePitch(inst->source, pitch);
 			}
 		}
 	}
