@@ -525,3 +525,14 @@ inline bool NameStartsWithIndexedSuffix(const char* name, const std::string& pre
 	return false;
 }
 
+inline bool NameStartsWithIndexedSuffix(const char* name, std::initializer_list<const char*> values, int maxIndex = 10) {
+	for (int i = 0; i < maxIndex; ++i) {
+		for (auto val : values) {
+			std::string full = val + std::to_string(i);
+			if (_strcmpi(name, full.c_str()) == 0)
+				return true;
+		}
+	}
+	return false;
+}
+

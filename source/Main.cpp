@@ -1511,7 +1511,12 @@ public:
 									}
 									else if (state == AL_PLAYING)
 									{
-										AudioManager.SetSourceGain(inst->source, gain);
+										bool notOk = NameStartsWithIndexedSuffix(inst->nameBuffer.c_str(), { "spin", "spin_end", "low_ammo" }) 
+											|| IsMatchingName(inst->nameBuffer.c_str(), { "spin", "spin_end", "low_ammo" });
+										if (!notOk) 
+										{
+											AudioManager.SetSourceGain(inst->source, gain);
+										}
 									}
 
 									// Doppler effect (never for ambience sounds tho)

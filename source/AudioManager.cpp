@@ -603,7 +603,7 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 
 	// for vehicle guns we make the sound a bit louder by changing it's distance attenuation
 	SoundInstanceSettings opts;
-	opts.maxDist = veh ? 125.0f : 100.0f;
+	opts.maxDist = veh ? 125.0f : FLT_MAX;
 	opts.gain = gain;
 	opts.airAbsorption = veh ? 1.5f : 2.5f;
 	opts.refDist = veh ? 1.5f : 3.0f;
