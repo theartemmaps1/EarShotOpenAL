@@ -337,49 +337,51 @@ auto __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispoi
 	bool metalSurface = Surface <= TOTAL_NUM_SURFACE_TYPES ? IsAudioMetal(eSurfaceType(Surface)) || Surface == SURFACE_GLASS : false/*(Surface == 53 || Surface == 63)*/;
 	bool woodSurface = Surface <= TOTAL_NUM_SURFACE_TYPES ? IsAudioWood(eSurfaceType(Surface)) || (victim && (victim->m_nModelIndex == 1532 || victim->m_nModelIndex == 1500 || victim->m_nModelIndex == 1478 || victim->m_nModelIndex == 1432) || IsWood(Surface)) : false;
 	bool handled = false;
-	switch (AudioEvent) {
-	case AE_PED_HIT_HIGH:
-	case AE_PED_HIT_LOW:
-	case AE_PED_HIT_GROUND: case AE_PED_HIT_GROUND_KICK:
-	case AE_PED_HIT_HIGH_UNARMED: case AE_PED_HIT_LOW_UNARMED:
-	case AE_PED_HIT_MARTIAL_PUNCH: case AE_PED_HIT_MARTIAL_KICK:
-	{
-		// Martial attacks
-		if (AudioEvent == 0x43 && AUDIOCALL(AUDIOMARTIALPUNCH)) {
-			Log("AUDIOMARTIALPUNCH success");
-			handled = true;
-		}
-		if (!handled && AudioEvent == 0x44 && AUDIOCALL(AUDIOMARTIALKICK)) {
-			Log("AUDIOMARTIALKICK success");
-			handled = true;
+	if (entity) {
+		switch (AudioEvent) {
+		case AE_PED_HIT_HIGH:
+		case AE_PED_HIT_LOW:
+		case AE_PED_HIT_GROUND: case AE_PED_HIT_GROUND_KICK:
+		case AE_PED_HIT_HIGH_UNARMED: case AE_PED_HIT_LOW_UNARMED:
+		case AE_PED_HIT_MARTIAL_PUNCH: case AE_PED_HIT_MARTIAL_KICK:
+		{
+			// Martial attacks
+			if (AudioEvent == 0x43 && AUDIOCALL(AUDIOMARTIALPUNCH)) {
+				Log("AUDIOMARTIALPUNCH success");
+				handled = true;
+			}
+			if (!handled && AudioEvent == 0x44 && AUDIOCALL(AUDIOMARTIALKICK)) {
+				Log("AUDIOMARTIALKICK success");
+				handled = true;
+			}
+
+			// Surface-specific
+			if (!handled && metalSurface && AUDIOCALL(AUDIOHITMETALT)) {
+				Log("AUDIOHITMETALT success");
+				handled = true;
+			}
+			if (!handled && woodSurface && AUDIOCALL(AUDIOHITWOOD)) {
+				Log("AUDIOHITWOOD success");
+				handled = true;
+			}
+			if (!handled && (AudioEvent == 63 || AudioEvent == 64) && AUDIOCALL(AUDIOHITGROUND)) {
+				Log("AUDIOHITGROUND success");
+				handled = true;
+			}
+
+			// Fallback for hitting flesh
+			if (!handled && !woodSurface && (victim && victim->m_nType == ENTITY_TYPE_PED) && IsFleshy(Surface) && AUDIOCALL(AUDIOHIT)) {
+				Log("AUDIOHIT fallback success");
+				handled = true;
+			}
+
+			break;
 		}
 
-		// Surface-specific
-		if (!handled && metalSurface && AUDIOCALL(AUDIOHITMETALT)) {
-			Log("AUDIOHITMETALT success");
-			handled = true;
+		default:
+			Log("Unhandled AudioEvent %d", AudioEvent);
+			break;
 		}
-		if (!handled && woodSurface && AUDIOCALL(AUDIOHITWOOD)) {
-			Log("AUDIOHITWOOD success");
-			handled = true;
-		}
-		if (!handled && (AudioEvent == 63 || AudioEvent == 64) && AUDIOCALL(AUDIOHITGROUND)) {
-			Log("AUDIOHITGROUND success");
-			handled = true;
-		}
-
-		// Fallback for hitting flesh
-		if (!handled && !woodSurface && (victim && victim->m_nType == ENTITY_TYPE_PED) && IsFleshy(Surface) && AUDIOCALL(AUDIOHIT)) {
-			Log("AUDIOHIT fallback success");
-			handled = true;
-		}
-
-		break;
-	}
-
-	default:
-		Log("Unhandled AudioEvent %d", AudioEvent);
-		break;
 	}
 
 
@@ -1062,7 +1064,7 @@ auto __fastcall HookedCAEPedAudioEntity__AddAudioEvent(CAEPedAudioEntity* ts, vo
 
 				int index = rnd.next();
 				ALuint buffer = (*selected)[index];
-				CVector position = pedPtr->GetPosition();
+				//CVector position = pedPtr->GetPosition();
 				float referenceDistance;
 
 				if (pedPtr->IsPlayer()) {
@@ -1094,13 +1096,14 @@ auto __fastcall HookedCAEPedAudioEntity__AddAudioEvent(CAEPedAudioEntity* ts, vo
 					}
 				}
 				SoundInstanceSettings opts;
-				opts.maxDist = pedPtr->IsPlayer() ? 140.0f : 150.0f;
+				opts.maxDist = FLT_MAX;//pedPtr->IsPlayer() ? 140.0f : 150.0f;
 				opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
 				opts.airAbsorption = pedPtr->IsPlayer() ? 1.5f : 3.0f;
 				opts.refDist = referenceDistance;
 				opts.rollOffFactor = pedPtr->IsPlayer() ? 1.5f : 2.5f;
 				opts.pitch = pitch;
-				opts.pos = position;
+				opts.entity = pedPtr;
+				//opts.pos = position;
 				AudioManager.PlaySource(buffer, opts);
 				return;
 			}
@@ -1572,16 +1575,20 @@ public:
 					cameraposition = pos;
 					alListener3f(AL_POSITION, cameraposition.x, cameraposition.y, cameraposition.z);
 					// For correct sound panning we use camera's heading, ensuring convincing 3D audio
+					CVector vecCamDir = TheCamera.m_mCameraMatrix.GetForward();
+					CVector vecCamUpDir = TheCamera.m_mCameraMatrix.GetUp();
+					vecCamDir.Normalise();
+					vecCamUpDir.Normalise();
 					ALfloat orientation[6] =
 					{
-					TheCamera.GetMatrix()->GetForward().x, TheCamera.GetMatrix()->GetForward().y, TheCamera.GetMatrix()->GetForward().z, // forward vector
-					TheCamera.GetMatrix()->GetUp().x, TheCamera.GetMatrix()->GetUp().y,  TheCamera.GetMatrix()->GetUp().z // up vector
+					vecCamDir.x, vecCamDir.y, vecCamDir.z, // forward vector
+					vecCamUpDir.x, vecCamUpDir.y, vecCamUpDir.z // up vector
 					};
 
 					alListenerfv(AL_ORIENTATION, orientation);
 					AudioManager.audiosplaying.erase(remove_if(AudioManager.audiosplaying.begin(), AudioManager.audiosplaying.end(),
 						[&](const std::shared_ptr<SoundInstance>& inst) {
-							float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+							//float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 							ALint state;
 							state = AudioManager.GetSourceState(inst->source);
 							// Update missile sound position and velocity
@@ -1753,4 +1760,9 @@ public:
 extern "C" __declspec(dllexport) ALCcontext* GetContext()
 {
 	return AudioManager.GetContext();
+}
+
+extern "C" __declspec(dllexport) ALCdevice* GetDevice()
+{
+	return AudioManager.GetDevice();
 }
