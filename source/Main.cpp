@@ -1250,7 +1250,7 @@ bool __cdecl TriggerTankFireHooked(CEntity* victim, CEntity* creator, eExplosion
 		}
 	}
 	subhook_remove(subhookCExplosion__AddExplosion);
-	bool result = CExplosion::AddExplosion(victim, creator, type, pos, lifetime, usesSound, cameraShake, bInvisible);
+	bool result = AddExplosion(victim, creator, type, pos, lifetime, usesSound, cameraShake, bInvisible);
 	subhook_install(subhookCExplosion__AddExplosion);
 	g_lastExplosionType[creator] = -1;
 	return result;
@@ -1394,7 +1394,7 @@ public:
 		if (DebugMenuLoad())
 		{
 			DebugMenuAddCmd("EarShot", "Reload all audio folders", Loaders::ReloadAudioFolders);
-			DebugMenuAddUInt64("EarShot", "Max bytes that can be written into log", (uint64_t*)&maxBytesInLog, nullptr, 10, 0, 9000000, nullptr);
+			DebugMenuAddUInt64("EarShot", "Max bytes that can be written into log", &maxBytesInLog, nullptr, 10, 0, std::numeric_limits<uint64_t>::max(), nullptr);
 			DebugMenuAddVarBool8("EarShot", "Toggle debug log", (int8_t*)&Logging, nullptr);
 			//	DebugMenuAddVarBool8("EarShot", "Toggle reverb type (EAX or EFX)", (int8_t*)&EAXOrNot, nullptr);
 		}
@@ -1403,8 +1403,7 @@ public:
 			{
 				AudioManager.Initialize();
 			};
-		patch::RedirectCall(0x504D11, PlayMinigunBarrelStopSound);
-		patch::RedirectCall(0x504CD2, PlayMinigunBarrelStopSound);
+		patch::RedirectCall({ 0x504D11, 0x504CD2 }, PlayMinigunBarrelStopSound);
 		patch::RedirectCall(0x4DF81B, HookedCAudioEngine__ReportWeaponEvent); // LS gunfire ambience
 		patch::RedirectCall(0x4DFAE6, HookedFireProjectile);
 		patch::RedirectCall(0x72BB37, HookedCAEWeatherAudioEntity__AddAudioEvent);

@@ -53,7 +53,7 @@ void CAudioManager::Initialize()
 	pDevice = alcOpenDevice(nullptr);
 	ALenum error = alGetError();
 	if (!pDevice) {
-		Log("Could not open OpenAL device! Error: %s", OpenALErrorCodeToString(error));
+		Log("Could not open OpenAL device! Error: %s", OpenALErrorCodeToString(error).c_str());
 		modMessage("Could not open OpenAL device! Error:" + OpenALErrorCodeToString(error));
 		return;
 	}

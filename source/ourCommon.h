@@ -310,6 +310,8 @@ inline void DeleteAllBuffers(Buffers& b) {
 #define AUDIOHITGROUND(MODELID) AUDIOPLAY(MODELID, "stomp")
 #define AUDIOSWING(MODELID) AUDIOPLAY(MODELID, "swing")
 #define AUDIOSPINEND(MODELID) AUDIOPLAY(MODELID, "spin_end")
+#define AUDIOSTEALTHCUT1(MODELID) AUDIOPLAY(MODELID, "stealth_firstcut")
+#define AUDIOSTEALTHCUT2(MODELID) AUDIOPLAY(MODELID, "stealth_secondcut")
 #define AUDIOCALL(AUDIOMACRO) \
     ((entity->m_nType == eEntityType::ENTITY_TYPE_PED && AUDIOMACRO(MODELUNDEFINED)) || AUDIOMACRO(entity->m_nModelIndex))
 #define MODELUNDEFINED eModelID(-1)
@@ -469,7 +471,6 @@ inline bool IsPavement(uint32_t id) {
 	return CallMethodAndReturn<bool, 0x55E7F0, SurfaceInfos_c*, uint32_t>(&g_surfaceInfos, id);
 }
 
-
 inline float sq(float x)
 {
 	return x * x;
@@ -535,4 +536,9 @@ inline bool NameStartsWithIndexedSuffix(const char* name, std::initializer_list<
 	}
 	return false;
 }
+
+inline bool AddExplosion(CEntity* victim, CEntity* creator, eExplosionType explosionType, CVector posn, unsigned int time, unsigned char makeSound, float camShake, unsigned char visibility) {
+	return plugin::CallAndReturn<bool, 0x736A50, CEntity*, CEntity*, eExplosionType, CVector, unsigned int, unsigned char, float, unsigned char>(victim, creator, explosionType, posn, time, makeSound, camShake, visibility);
+}
+
 
