@@ -229,7 +229,7 @@ auto __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 	}
 
 	float dist = DistanceBetweenPoints(cameraposition, entity->GetPosition());
-	bool farAway = dist > distanceForDistantGunshot;
+	bool farAway = dist >= distanceForDistantGunshot;
 	bool emptyPlayed = false, dryFirePlayed = false;
 	bool alternatePlayed = false;
 
@@ -259,7 +259,7 @@ auto __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 	}
 
 	// Try alternate shoot + after sounds
-	for (int i = 0; i < 10; ++i) {
+	for (int i = 0; i < MAX_SOUND_ALTERNATIVES; ++i) {
 		std::string altShoot = "shoot" + std::to_string(i);
 		std::string altAfter = "after" + std::to_string(i);
 		if (AUDIOPLAY(entity->m_nModelIndex, altShoot) &&
@@ -346,11 +346,11 @@ auto __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispoi
 		case AE_PED_HIT_MARTIAL_PUNCH: case AE_PED_HIT_MARTIAL_KICK:
 		{
 			// Martial attacks
-			if (AudioEvent == 0x43 && AUDIOCALL(AUDIOMARTIALPUNCH)) {
+			if (AudioEvent == AE_PED_HIT_MARTIAL_PUNCH && AUDIOCALL(AUDIOMARTIALPUNCH)) {
 				Log("AUDIOMARTIALPUNCH success");
 				handled = true;
 			}
-			if (!handled && AudioEvent == 0x44 && AUDIOCALL(AUDIOMARTIALKICK)) {
+			if (!handled && AudioEvent == AE_PED_HIT_MARTIAL_KICK && AUDIOCALL(AUDIOMARTIALKICK)) {
 				Log("AUDIOMARTIALKICK success");
 				handled = true;
 			}
@@ -364,7 +364,7 @@ auto __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispoi
 				Log("AUDIOHITWOOD success");
 				handled = true;
 			}
-			if (!handled && (AudioEvent == 63 || AudioEvent == 64) && AUDIOCALL(AUDIOHITGROUND)) {
+			if (!handled && (AudioEvent == AE_PED_HIT_GROUND || AudioEvent == AE_PED_HIT_GROUND_KICK) && AUDIOCALL(AUDIOHITGROUND)) {
 				Log("AUDIOHITGROUND success");
 				handled = true;
 			}
@@ -530,7 +530,7 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 	float dist = DistanceBetweenPoints(cameraposition, *posn);
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 	// We only process those that aren't really far away (except for distant sounds)
-	bool farAway = dist > distanceForDistantExplosion;
+	bool farAway = dist >= distanceForDistantExplosion;
 	bool handled = false;
 	float waterLevel = 0.0f;
 	bool isUnderWater = CWaterLevel::GetWaterLevelNoWaves(posn->x, posn->y, posn->z, &waterLevel);
@@ -553,7 +553,7 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 				for (auto& data : g_lastExplosionType) {
 					int expType = data.second;
 					auto it = explosionContainer.find(expType);
-					if (it != explosionContainer.end() && !it->second.empty()) {
+					if (it != explosionContainer.end() && !it->second.empty() && expType != -1) {
 						Log("HookedCAEExplosionAudioEntity_AddAudioEvent: Using ExplosionType: %d for: %s", expType, what);
 						return &it->second;
 					}
@@ -612,15 +612,15 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 			opts.maxDist = distanceForDistantExplosion;
 			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
 			opts.airAbsorption = 0.6f;
-			opts.refDist = 9.0f;
+			opts.refDist = 10.0f;
 			opts.rollOffFactor = 0.7f;
 			opts.pitch = pitch;
 			opts.pos = *posn;
 			handled = AudioManager.PlaySource(buff, opts) != nullptr;
 		}
-		else {
-			OG();
-		}
+		//else {
+		//	OG();
+		//}
 
 		// Debris
 		if (auto* debrisBuffers =
@@ -930,7 +930,6 @@ auto __fastcall CAEPedAudioEntity__HandlePedJacked(CAEPedAudioEntity* ts, void*,
 	bool handled = false;
 	CVector PedPos = ts->m_pPed->GetPosition();
 
-	float dist = DistanceBetweenPoints(cameraposition, PedPos);
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 
 	auto PlayJackingSound = [&](const std::vector<ALuint>& bufferList) {
@@ -988,11 +987,10 @@ auto __fastcall CAEPedAudioEntity__HandlePedJacked(CAEPedAudioEntity* ts, void*,
 }
 
 
+// footsteps
 auto __fastcall HookedCAEPedAudioEntity__AddAudioEvent(CAEPedAudioEntity* ts, void*, eAudioEvents audioEvent, float volume, float speed, CPhysical* ped, uint8_t surfaceId, int32_t a7, uint32_t maxVol)
 {
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
-	//float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
-	//float audiovolume = AEAudioHardware.m_fEffectMasterScalingFactor * fader;
 	if (ts && ts->m_pPed) {
 		auto pedPtr = ts->m_pPed;
 		eSurfaceType actualSurface = eSurfaceType(pedPtr->m_nContactSurface);
@@ -1135,7 +1133,7 @@ void __fastcall HookedCAudioEngine__ReportWeaponEvent(CAudioEngine* engine, void
 	CallMethod<0x506F40, CAudioEngine*, int32_t, eWeaponType, CPhysical*>(engine, audioEvent, weaponType, physical);
 }
 
-
+// Missile flying sound
 char __fastcall HookedFireProjectile(
 	void* ts, int,
 	eWeaponType weaponType, CPhysical* physical, eAudioEvents aEvent)
@@ -1145,11 +1143,8 @@ char __fastcall HookedFireProjectile(
 	CVehicle* playaVehicle = FindPlayerVehicle();
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 	bool handled = false;
-	//	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
-	//	float audiovolume = AEAudioHardware.m_fEffectMasterScalingFactor * fader;
 	if (ts) {
 
-		//CVector pos = playaVehicle ? playaVehicle->GetPosition() : (playa ? playa->GetPosition() : CVector(0.0f,0.0f,0.0f));
 		if (aEvent == 0x94) // projectile fire event
 		{
 
@@ -1160,7 +1155,7 @@ char __fastcall HookedFireProjectile(
 				handled = true;
 			}
 			// Custom missile fly sound
-			if (physical/* && (weaponType == WEAPONTYPE_ROCKET || weaponType == WEAPONTYPE_ROCKET_HS)*/)
+			if (physical)
 			{
 				if (physical->m_nModelIndex == 345) { // missile model id
 					auto inst = std::make_shared<SoundInstance>();
@@ -1377,6 +1372,144 @@ void ManageLastManAndTeamKill() {
 }
 #endif
 
+//TODO
+void __fastcall PlayChainsawEvent(CAEWeaponAudioEntity* ts, int, CPed* ped, int Aevent)
+{
+	if (!ts || !ped)
+		return;
+
+
+		Log("Chainsaw event: %d | state: %d | time: %u",
+			Aevent, ts->m_nChainsawSoundState, ts->m_dwTimeChainsaw);
+
+	static ALuint s_idleBuf = 0;
+	static ALuint s_activeBuf = 0;
+	static ALuint s_cuttingBuf = 0;
+
+	if (!s_idleBuf)
+		s_idleBuf = AudioManager.CreateOpenALBufferFromAudioFile(foldermod / "chainsaw/idle.wav");
+	if (!s_activeBuf)
+		s_activeBuf = AudioManager.CreateOpenALBufferFromAudioFile(foldermod / "chainsaw/active.wav");
+	if (!s_cuttingBuf)
+		s_cuttingBuf = AudioManager.CreateOpenALBufferFromAudioFile(foldermod / "chainsaw/cutting.wav");
+
+	if (!s_idleBuf || !s_activeBuf || !s_cuttingBuf) {
+		Error("Failed to load one or more chainsaw sounds!");
+		ts->ReportChainsawEvent(ped, Aevent);
+		return;
+	}
+
+	SoundInstanceSettings opts;
+	opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+	opts.shooter = ped;
+	opts.looping = true;
+	opts.isChainsawSound = true;
+
+	std::shared_ptr<SoundInstance> existing;
+	for (auto& sfx : AudioManager.audiosplaying) {
+		if (sfx && sfx->isChainsawSound && sfx->source != 0) {
+			existing = sfx;
+			break;
+		}
+	}
+
+
+	bool managed = false;
+	if (existing) {
+		managed = true;
+	}
+
+	if (!existing && ts->m_nChainsawSoundState == 4) {
+		switch (Aevent)
+		{
+		case AE_WEAPON_CHAINSAW_IDLE:
+			if (AudioManager.PlaySource(s_idleBuf, opts))
+				managed = true;
+			break;
+
+		case AE_WEAPON_CHAINSAW_ACTIVE:
+			if (AudioManager.PlaySource(s_activeBuf, opts))
+				managed = true;
+			break;
+
+		case AE_WEAPON_CHAINSAW_CUTTING:
+			if (AudioManager.PlaySource(s_cuttingBuf, opts))
+				managed = true;
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	if (!managed) {
+		ts->ReportChainsawEvent(ped, Aevent);
+	}
+}
+
+
+
+void __fastcall PlayChainsawStopSound(CAEWeaponAudioEntity* ts, int, CPhysical* entity)
+{
+	Log("YES KING");
+	for (auto& sfx : AudioManager.audiosplaying)
+	{
+		if (sfx && sfx->isChainsawSound && sfx->source != 0)
+		{
+			alSourceStop(sfx->source);
+			alSourcei(sfx->source, AL_BUFFER, 0);
+			alDeleteSources(1, &sfx->source);
+			Log("YES KING: o");
+			sfx->source = 0;
+			sfx->isChainsawSound = false;
+		}
+	}
+
+	if (ts)
+		ts->PlayChainsawStopSound(entity);
+}
+
+void __fastcall RequestNewSoundHooksForStealth(void* ts, int, CAESound* sound)
+{
+	// paranoid coding moment
+	bool handled = false;
+	if (ts && sound && sound->m_pBaseAudio)
+	{
+		CAEWeaponAudioEntity* weapEnt = (CAEWeaponAudioEntity*)sound->m_pBaseAudio;
+		CWeapon* weap = nullptr;
+		unsigned int Aevent = sound->m_nEvent;
+		Log("Stealth Aevent: %u", Aevent);
+		if (weapEnt && weapEnt->m_bActive)
+		{
+			CPed* entity = weapEnt->m_pPed;
+			if (entity) {
+				weap = entity->GetWeapon();
+				if (weap)
+				{
+					eWeaponType weaponType = weap->m_eWeaponType;
+					switch (Aevent)
+					{
+					case AE_FRONTEND_PICKUP_COLLECTABLE1:
+						if (AUDIOCALL(AUDIOSTEALTHCUT1))
+							handled = true;
+						break;
+
+					case AE_FRONTEND_CAR_NO_CASH:
+						if (AUDIOCALL(AUDIOSTEALTHCUT2))
+							handled = true;
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	if (!handled) 
+	{
+		CallMethod<0x4EFB10, void*, CAESound*>(ts, sound);
+	}
+}
+
 class EarShot {
 public:
 	EarShot() {
@@ -1407,6 +1540,9 @@ public:
 		patch::RedirectCall(0x4DF81B, HookedCAudioEngine__ReportWeaponEvent); // LS gunfire ambience
 		patch::RedirectCall(0x4DFAE6, HookedFireProjectile);
 		patch::RedirectCall(0x72BB37, HookedCAEWeatherAudioEntity__AddAudioEvent);
+		//patch::RedirectCall({ 0x503C12, 0x503CC9 }, RequestNewSoundHooksForStealth);
+		//patch::RedirectCall(0x4E6A67, PlayChainsawEvent);
+		//patch::RedirectCall(0x504E5A, PlayChainsawStopSound);
 #ifdef QUAKE_KILLSOUNDS_TEST
 		patch::RedirectCall(0x4B93AA, HookedRegisterKillByPlayer);
 #endif
@@ -1468,6 +1604,8 @@ public:
 						Events::gameProcessEvent += [] 
 							{
 								float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+								bool isNight = (CClock::ms_nGameClockHours >= 20 || CClock::ms_nGameClockHours < 6);
+								bool isRiot = CGameLogic::LaRiotsActiveHere();
 								for (auto& inst : AudioManager.audiosplaying)
 								{
 									// This gave me PTSD, it created one bug to another, and i managed to get it fixed
@@ -1513,43 +1651,13 @@ public:
 									}
 									else if (state == AL_PLAYING)
 									{
-										bool notOk = NameStartsWithIndexedSuffix(inst->nameBuffer.c_str(), { "spin", "spin_end", "low_ammo" }) 
+										// they compute fadings for themselves, don't mess with those sounds
+										bool notOk = NameStartsWithIndexedSuffix(inst->nameBuffer.c_str(), { "spin", "spin_end", "low_ammo" })
 											|| IsMatchingName(inst->nameBuffer.c_str(), { "spin", "spin_end", "low_ammo" });
-										if (!notOk) 
+										if (!notOk)
 										{
 											AudioManager.SetSourceGain(inst->source, gain);
 										}
-									}
-
-									// Doppler effect (never for ambience sounds tho)
-									// Cut cuz useless
-									if (inst->bIsMissile && inst->source == inst->missileSource) {
-										static CVector prevPos = *TheCamera.GetGameCamPosition();
-										static CVector smoothedVel{ 0.0f, 0.0f, 0.0f };
-										static bool prevSkipFrame = false;
-
-										bool skipFrame = TheCamera.m_bJust_Switched || TheCamera.m_bCameraJustRestored || CPad::GetPad(0)->JustOutOfFrontEnd;
-										CVector position = *TheCamera.GetGameCamPosition();
-
-										float timeStep = 0.001f * (CTimer::m_snTimeInMillisecondsNonClipped - CTimer::m_snPreviousTimeInMillisecondsNonClipped);
-
-										if (!skipFrame && timeStep > 0.0001f) {
-											CVector vel = (position - prevPos) / timeStep;
-
-											if (!prevSkipFrame) {
-												smoothedVel = (smoothedVel * 2.0f + vel) / 3.0f;
-											}
-											else {
-												smoothedVel = vel;
-											}
-											alListener3f(AL_VELOCITY, smoothedVel.x, smoothedVel.y, smoothedVel.z);
-										}
-
-										prevPos = position;
-										prevSkipFrame = skipFrame;
-									}
-									else {
-										alListener3f(AL_VELOCITY, 0.0f, 0.0f, 0.0f);
 									}
 
 									// Pause audio's when it's time to do so
@@ -1566,6 +1674,37 @@ public:
 										AudioManager.ResumeSource(inst.get());
 									}
 									AudioManager.AttachReverbToSource(inst.get()->source);
+
+									static auto GetAmbienceTimeOfDay = [&](const std::string& stem) -> EAmbienceTime {
+										//Log("GetAmbienceTimeOfDay: stem='%s'", stem.c_str());
+										if (stem.ends_with("_night") || NameEndsWithIndexedSuffix(stem, "_night")) return EAmbienceTime::Night;
+										if (stem.ends_with("_riot") || NameEndsWithIndexedSuffix(stem, "_riot")) return EAmbienceTime::Riot;
+										return EAmbienceTime::Day;
+										};
+									// we stop ambience sounds that don't fit the time of day or riot state
+									if (inst && state == AL_PLAYING && inst->isAmbience && !inst->isGunfireAmbience && !inst->isManualAmbience && inst->source != 0)
+									{
+											std::string stem = inst->path.stem().string();
+											bool isReallyAAmbience = 
+												NameStartsWithIndexedSuffix(stem.c_str(), "ambience")
+												|| IsMatchingName(stem.c_str(), "ambience") ||
+												(stem.ends_with("_night") || NameEndsWithIndexedSuffix(stem, "_night")) ||
+												(stem.ends_with("_riot") || NameEndsWithIndexedSuffix(stem, "_riot"));
+											if (isReallyAAmbience) {
+												//if (buff.second == 0) continue;
+												auto timeOfDay = GetAmbienceTimeOfDay(stem);
+												//Log("Time of day %d", timeOfDay);
+												bool cantPlay = (timeOfDay == EAmbienceTime::Night && !isNight) || (timeOfDay == EAmbienceTime::Riot && !isRiot);
+
+												if (cantPlay)
+												{
+													//Log("Stopped for time of day %d", timeOfDay);
+													alSourceStop(inst->source);
+													alDeleteSources(1, &inst->source);
+													inst->source = 0;
+												}
+											}
+										}
 								}
 							};
 					}

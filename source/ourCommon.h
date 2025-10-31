@@ -478,11 +478,9 @@ inline float sq(float x)
 
 #define SQR(x) ((x) * (x))
 
-inline float SquaredMagnitude(const CVector& vec) {
-	return vec.x * vec.x + vec.y * vec.y + vec.z * vec.z;
-}
+
 inline bool IsPointWithinSphere(const CSphere& sphere, const CVector& p) {
-	return SquaredMagnitude(p - sphere.m_vecCenter) <= sq(sphere.m_fRadius);
+	return (p - sphere.m_vecCenter).MagnitudeSqr() <= sq(sphere.m_fRadius);
 }
 
 #include <random>    // std::mt19937, std::random_device
@@ -517,7 +515,15 @@ inline bool IsMatchingName(const char* name, std::initializer_list<const char*> 
 	return false;
 }
 
-inline bool NameStartsWithIndexedSuffix(const char* name, const std::string& prefix, int maxIndex = 10) {
+inline bool IsMatchingName(const char* name, const char* what) {
+
+	if (_strcmpi(name, what) == 0)
+		return true;
+
+	return false;
+}
+
+inline bool NameStartsWithIndexedSuffix(const char* name, const std::string& prefix, int maxIndex = MAX_SOUND_ALTERNATIVES) {
 	for (int i = 0; i < maxIndex; ++i) {
 		std::string full = prefix + std::to_string(i);
 		if (_strcmpi(name, full.c_str()) == 0)
@@ -526,7 +532,16 @@ inline bool NameStartsWithIndexedSuffix(const char* name, const std::string& pre
 	return false;
 }
 
-inline bool NameStartsWithIndexedSuffix(const char* name, std::initializer_list<const char*> values, int maxIndex = 10) {
+inline bool NameEndsWithIndexedSuffix(const std::string& name, const std::string& what, int maxIndex = MAX_AMBIENCE_ALTERNATIVES) {
+	for (int i = 0; i < maxIndex; ++i) {
+		std::string full = what + std::to_string(i);
+		if (name.ends_with(full))
+			return true;
+	}
+	return false;
+}
+
+inline bool NameStartsWithIndexedSuffix(const char* name, std::initializer_list<const char*> values, int maxIndex = MAX_SOUND_ALTERNATIVES) {
 	for (int i = 0; i < maxIndex; ++i) {
 		for (auto val : values) {
 			std::string full = val + std::to_string(i);

@@ -8,7 +8,7 @@ uint64_t numBytesInLog; // Number of bytes currently written into thelog file
 void Log(const char* msg, ...) {
     // If log file ain't open yet, open it
     if (LogFile == nullptr && Logging) {
-        LogFile = fopen(PLUGIN_PATH((char*)"EarShotOpenAL.log"), "a");
+        LogFile = fopen(PLUGIN_PATH("EarShotOpenAL.log"), "a");
         if (LogFile == nullptr) {
             Error("Failed to open the log file! Reason: %s.", strerror(errno));
             return;
@@ -74,7 +74,7 @@ void CloseLog()
 void ClearLogFile()
 {
     // Clears the amount of bytes written...
-    auto path = PLUGIN_PATH((char*)"EarShotOpenAL.log");
+    auto path = PLUGIN_PATH("EarShotOpenAL.log");
     numBytesInLog = 0;
     if (LogFile == nullptr)
     {

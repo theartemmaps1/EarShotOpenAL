@@ -123,7 +123,7 @@ void Loaders::LoadBulletWhizzSounds(const fs::path& folder) {
 	}
 }
 
-void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOldAmbience)
+void Loaders::LoadAmbienceSounds(const fs::path& path, bool loadOldAmbience)
 {
 	fs::path ambientDir = path / "generic/ambience";
 	if (!fs::exists(ambientDir) || !fs::is_directory(ambientDir)) {
@@ -266,7 +266,7 @@ void Loaders::LoadAmbienceSounds(const std::filesystem::path& path, bool loadOld
 			}
 		}
 
-		for (int i = 0; i <= 300; ++i) {
+		for (int i = 0; i <= MAX_AMBIENCE_ALTERNATIVES; ++i) {
 			for (const auto& ext : extensions) {
 				fs::path dayPath = ambientDir / ("ambience" + std::to_string(i) + ext);
 				fs::path nightPath = ambientDir / ("ambience_night" + std::to_string(i) + ext);

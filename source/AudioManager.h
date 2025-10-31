@@ -12,7 +12,11 @@ using namespace std;
 namespace fs = std::filesystem;
 inline std::unordered_map<std::string, std::optional<float>> s_pitchCache;
 
+#define MAX_SOUND_ALTERNATIVES (10)
+#define MAX_AMBIENCE_ALTERNATIVES (300)
+
 inline const std::vector<std::string> extensions = { ".wav", ".mp3", ".flac", ".ogg" }; // all supported audio extensions
+enum class EAmbienceTime { Any, Day, Night, Riot };
 
 struct AudioData {
 	std::vector<float> samples;
@@ -46,8 +50,10 @@ struct SoundInstance
 	bool minigunBarrelSpin = false;
 	// Ambience stuff
 	bool isAmbience = false;
+	EAmbienceTime ambienceTime = EAmbienceTime::Any;
 	bool isGunfireAmbience = false;
 	bool isManualAmbience = false;
+	bool isChainsawSound = false;
 	eWeaponType WeaponType;
 	CPed* shooter = nullptr;
 	ALenum spinningstatus;
@@ -89,6 +95,7 @@ struct SoundInstanceSettings {
 	bool looping = false;
 	bool isAmbience = false;
 	bool isGunfire = false;
+	bool isChainsawSound = false;
 
 	CFire* firePtr = nullptr;
 	int fireEventID = 0;
@@ -103,9 +110,6 @@ struct SoundInstanceSettings {
 	std::optional<std::string> name;
 	uint32_t delayMs = 0;
 };
-
-
-enum class EAmbienceTime { Any, Day, Night, Riot };
 
 struct ManualAmbience {
 	CVector pos;
@@ -161,10 +165,10 @@ private:
 public:
 
 	static bool efxSupported;
-	static map<string, ALuint> gBufferMap;
+	// WAV buffer storage
+	static map<fs::path, ALuint> gBufferMap;
 	// Main array to manage ALL currently playing sounds
 	static std::vector<std::shared_ptr<SoundInstance>> audiosplaying;
-	// WAV buffer storage
 
 	void Initialize();
 	void Shutdown();
