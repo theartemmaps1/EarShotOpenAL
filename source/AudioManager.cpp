@@ -140,7 +140,7 @@ void CAudioManager::Shutdown()
 	//Delete all loaded WAV buffers
 	for (auto& buf : gBufferMap) {
 		if (buf.second != 0) {
-			Log("Freeing buffer %u, name: %s", buf.second, buf.first.c_str());
+			Log("Freeing buffer %u, name: %s", buf.second, buf.first.string().c_str());
 			alDeleteBuffers(1, &buf.second);
 			buf.second = 0;
 		}
