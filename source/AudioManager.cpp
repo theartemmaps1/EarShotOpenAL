@@ -607,7 +607,7 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 	opts.maxDist = veh ? 125.0f : 1000.0f;
 	opts.gain = gain;
 	opts.airAbsorption = veh ? 1.5f : 2.0f;
-	opts.refDist = veh ? 1.5f : 6.0f;
+	opts.refDist = veh ? 1.5f : 4.5f;
 	opts.rollOffFactor = veh ? 0.5f : 1.0f;
 	opts.pitch = pitch;
 	opts.pos = pos;
@@ -632,8 +632,7 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 		// Some sounds need to be quieter or louder
 		Reloads = IsMatchingName(inst->nameBuffer.c_str(), { "reload", "reload_one", "reload_two" });
 		NeedsToBeQuieter = IsMatchingName(inst->name, {
-			"hit", "swing", "stomp", "martial_kick", "martial_punch",
-			"reload", "reload_one", "reload_two"
+			"hit", "swing", "stomp", "martial_kick", "martial_punch"
 			});
 
 		// Check indexed variants for quieter sounds
@@ -651,13 +650,14 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 
 		// Special cases
 		if (Reloads) {
-			AudioManager.SetSourceMaxDist(inst->source, 500.0f);
-			AudioManager.SetSourceRefDist(inst->source, 2.0f);
-			AudioManager.SetSourceRolloffFactor(inst->source, 3.0f);
+			AudioManager.SetSourceMaxDist(inst->source, 1500.0f);
+			AudioManager.SetSourceRefDist(inst->source, 2.3f);
+			AudioManager.SetSourceRolloffFactor(inst->source, 6.0f);
 		}
 		else if (NeedsToBeQuieter) {
-			AudioManager.SetSourceMaxDist(inst->source, 500.0f);
+			AudioManager.SetSourceMaxDist(inst->source, 3000.0f);
 			AudioManager.SetSourceRefDist(inst->source, 2.0f);
+			AudioManager.SetSourceRolloffFactor(inst->source, 3.0f);
 		}
 		else if (isDistant) {
 			AudioManager.SetSourceMaxDist(inst->source, 300.0f);
