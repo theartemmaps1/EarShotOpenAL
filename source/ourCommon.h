@@ -31,6 +31,7 @@ inline uint32_t zoneIntervalMax = 10000;
 inline float distanceForDistantExplosion = 100.0f;
 inline float distanceForDistantGunshot = 50.0f;
 inline float stereoAmbienceVol = 0.3f;
+inline std::unordered_map<CEntity*, int> g_lastExplosionType;
 
 // WIP of my fun idea made out of boredom, define to enable!
 //#define QUAKE_KILLSOUNDS_TEST
@@ -160,7 +161,6 @@ struct Buffers
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeDistantBuffers;
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeDebrisBuffers;
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeUnderwaterBuffers;
-	std::unordered_map<CEntity*, int32_t> g_ExplosionTypes;
 };
 
 extern Buffers g_Buffers;
@@ -289,8 +289,6 @@ inline void DeleteAllBuffers(Buffers& b) {
 	// and clear ent vector if it holds CAEFireAudioEntity* references
 	g_Buffers.ent.clear();
 
-	// g_ExplosionTypes only stores ints, no ALuints, so just clear
-	b.g_ExplosionTypes.clear();
 }
 
 #define AUDIOPLAY(MODELID, FILESTEM) AudioManager.findWeapon(&weaponType, eModelID(MODELID), std::string(FILESTEM), entity, true)

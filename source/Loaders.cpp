@@ -754,6 +754,7 @@ void Loaders::LoadExplosionRelatedSounds(const fs::path& folder) {
 	g_Buffers.ExplosionTypeDebrisBuffers.clear();
 	g_Buffers.ExplosionTypeDistantBuffers.clear();
 	g_Buffers.ExplosionTypeUnderwaterBuffers.clear();
+	g_lastExplosionType.clear();
 
 	auto loadBuffers = [](const fs::path& path, std::vector<ALuint>& vec, const std::string& prefix) {
 		int idx = 0;

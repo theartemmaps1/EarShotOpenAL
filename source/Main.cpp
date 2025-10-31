@@ -46,7 +46,6 @@
 using namespace plugin;
 using namespace std;
 DebugMenuAPI gDebugMenuAPI;
-std::unordered_map<CEntity*, int> g_lastExplosionType;
 namespace fs = std::filesystem;
 Buffers g_Buffers;
 
@@ -549,16 +548,14 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 		-> const std::vector<ALuint>*
 		{
 			// --- Explosion types ---
-			if (!g_lastExplosionType.empty()) {
 				for (auto& data : g_lastExplosionType) {
 					int expType = data.second;
 					auto it = explosionContainer.find(expType);
-					if (it != explosionContainer.end() && !it->second.empty() && expType != -1) {
+					if (it != explosionContainer.end() && !it->second.empty()) {
 						Log("HookedCAEExplosionAudioEntity_AddAudioEvent: Using ExplosionType: %d for: %s", expType, what);
 						return &it->second;
 					}
 				}
-			}
 
 			// --- Generic fallback ---
 			if (genericFallback && !genericFallback->empty()) {
@@ -1222,7 +1219,8 @@ bool __cdecl TriggerTankFireHooked(CEntity* victim, CEntity* creator, eExplosion
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 	Log("CExplosion::AddExplosion: added explosion with type %d", type);
 	// We'll reuse this later for explosion-type specific explosion sounds
-	g_lastExplosionType[creator] = (int)type;
+	g_lastExplosionType[creator] = static_cast<int>(type);
+
 	// Just to be sure
 	if (CPad::GetPad(0)->CarGunJustDown()) {
 		if (!g_Buffers.tankCannonFireBuffers.empty() && creator && creator->m_nType == ENTITY_TYPE_PED && ((CPed*)creator)->bInVehicle && type == EXPLOSION_TANK_FIRE)
@@ -1247,7 +1245,7 @@ bool __cdecl TriggerTankFireHooked(CEntity* victim, CEntity* creator, eExplosion
 	subhook_remove(subhookCExplosion__AddExplosion);
 	bool result = AddExplosion(victim, creator, type, pos, lifetime, usesSound, cameraShake, bInvisible);
 	subhook_install(subhookCExplosion__AddExplosion);
-	g_lastExplosionType[creator] = -1;
+	g_lastExplosionType.erase(creator);
 	return result;
 }
 
