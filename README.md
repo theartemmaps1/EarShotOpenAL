@@ -1,3 +1,5 @@
+<img width="3840" height="2160" alt="image" src="https://github.com/user-attachments/assets/ec4eff43-c193-401a-bdd6-f062d089736d" />
+
 # EarShot — Revamp by wuzimu7171_ (TheArtemMaps)
 
 A revamp of the abandoned **EarShot** mod, originally by HzanRsxa2959. EarShot lets you add **new weapon and world sounds to GTA San Andreas without replacing vanilla sounds.** The sound engine has been rewritten from the deprecated irrKlang library to OpenAL Soft, adding proper 3D spatialization, distance attenuation, doppler, reverb, air absorption, and more.
