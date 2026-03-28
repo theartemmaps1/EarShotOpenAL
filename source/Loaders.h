@@ -6,31 +6,38 @@
 namespace fs = std::filesystem;
 class Loaders {
 public:
-	static void LoadMinigunBarrelSpinSound(const fs::path& folder);
+	static void LoadMinigunSounds(const fs::path& folder);
+	static void LoadChainsawSounds(const fs::path& folder);
+	static void LoadFlamethrowerSounds(const fs::path& folder);
+	static void LoadSpraycanSound(const fs::path& folder);
+	static void LoadExtinguisherSound(const fs::path& folder);
 	static void LoadRicochetSounds(const fs::path& folder);
 	static void LoadFootstepSounds(const fs::path& baseFolder);
 	static void LoadExplosionRelatedSounds(const fs::path& folder);
 	static void LoadFireSounds(const fs::path& folder);
 	static void LoadJackingRelatedSounds(const fs::path& folder);
-	static void LoadMainWeaponsFolder();
+	static void InstallHooks();
+	static void RegisterAllWeapons();
 	static void LoadAmbienceSounds(const std::filesystem::path& path, bool loadOldAmbience = true);
 	static void LoadMissileSounds(const fs::path& folder);
 	static void LoadTankCannonSounds(const fs::path& folder);
 	static void LoadBulletWhizzSounds(const fs::path& folder);
+	static void LoadCameraAndGoggleSounds(const fs::path& folder);
+	static void InitializeIniFile(int stage, bool loadAll = false);
 	static void ReloadAudioFolders();
 };
-
-struct InteriorAmbience {
-	std::string gxtKey;
-	ALuint bufferDay;
-	ALuint bufferNight;
-};
-
 
 struct WeapInfos
 {
 	eWeaponType weapType;
 	std::string weapName;
+	std::string vehicleWeapName;
+	uint32_t modelId;
+
+	WeapInfos(eWeaponType t = WEAPONTYPE_UNARMED, const std::string& wn = {},
+		const std::string& vwn = {}, uint32_t mid = MODELUNDEFINED)
+		: weapType(t), weapName(wn), vehicleWeapName(vwn), modelId(mid) {
+	}
 };
 
 struct SoundFile {
@@ -46,14 +53,16 @@ struct QuakeSound
 };
 #endif
 
-inline std::unordered_map<int, std::vector<InteriorAmbience>> g_InteriorAmbience;
-inline std::vector<WeapInfos> weaponNames;
+inline  std::unordered_map<int, WeapInfos> weaponNamese;
+inline  std::vector<WeapInfos> weaponNames;
 inline auto registeredweapons = map<pair<eWeaponType, eModelID>, AudioStream>();
 
-inline auto registerWeapon = [&](fs::path& filepath) {
+inline void registerWeapon(fs::path& filepath) {
 	std::string weaponname = filepath.stem().string();
+	std::string weaponnameFull = filepath.filename().string();
+	int modelfound = -1;
 	if (weaponname.empty()) {
-		Log("Failed to register weapon sound for file %s", filepath.string().c_str());
+		LOG("Failed to register weapon sound for file %s", filepath.string().c_str());
 		return;
 	}
 
@@ -63,40 +72,70 @@ inline auto registerWeapon = [&](fs::path& filepath) {
 	size_t sep = weaponname.find(' ');
 	if (sep != std::string::npos) {
 		std::string modelname = weaponname.substr(sep + 1);
-		// Query model info — use int intermediate to avoid casting enum pointer
-		int modelfound = -1;
 		CBaseModelInfo* info = CModelInfo::GetModelInfo(modelname.c_str(), &modelfound);
 		if (info && modelfound > static_cast<int>(MODELUNDEFINED)) {
 			modelid = static_cast<eModelID>(modelfound);
 		}
 		else {
-			Log("Skipped weapon '%s': model '%s' was not found", weaponname.c_str(), modelname.c_str());
+			LOG("Skipped weapon '%s': model '%s' was not found", weaponname.c_str(), modelname.c_str());
 			return; // do not register if model missing
 		}
 		// keep only weapon part
 		weaponname = weaponname.substr(0, sep);
+		// add weapon part + model part
+		weaponnameFull = weaponname + " " + modelname;
+		LOG("full weapon name '%s'", weaponnameFull.c_str());
+		LOG("Found vehicle weapon '%s' model '%s' -> id=%d",
+			weaponname.c_str(), modelname.c_str(), modelid);
 	}
 
 	// Resolve weapon type from name
 	eWeaponType weapontype = WEAPONTYPE_UNARMED; // default
 	if (!nameType(&weaponname, &weapontype)) {
-		Log("Skipped weapon '%s': unknown weapon name", weaponname.c_str());
+		LOG("Skipped weapon '%s': unknown weapon name", weaponname.c_str());
 		return;
 	}
 
 	// avoid accidental overwrite
 	auto key = std::make_pair(weapontype, modelid);
 	if (registeredweapons.find(key) != registeredweapons.end()) {
-		Log("Weapon already registered type=%d model=%d -> skipping", (int)weapontype, (int)modelid);
+		LOG("Weapon already registered type=%d(%s) model=%d -> skipping", weapontype, weaponname.c_str(), modelid);
 		return;
 	}
 
-	// register: construct AudioStream from parent path
 	registeredweapons.emplace(key, AudioStream(filepath.parent_path()));
+	
+	weaponNames.emplace_back(weapontype, weaponname, weaponnameFull, static_cast<uint32_t>(modelid));
 
-	// store safe copy of name
-	weaponNames.emplace_back(weapontype, weaponname);
-
-	Log("Registered weapon type=%d model=%d path=%s",
-		(int)weapontype, (int)modelid, outputPath(&filepath).c_str());
+	LOG("Registered weapon type=%d(%s) model=%d path=%s",
+		weapontype, weaponname.c_str(), modelid, outputPath(&filepath).c_str());
 	};
+
+// to get the .earshot file for X entity, so we could read settings from it
+inline std::optional<fs::path> findEarshotForEntity(CEntity* audioentity, const fs::path& audiopath)
+{
+	if (!audioentity) return std::nullopt;
+
+	for (const auto& info : weaponNames) {
+		if (static_cast<int>(info.modelId) == audioentity->m_nModelIndex) {
+			fs::path earshotPath = audiopath.parent_path() / info.vehicleWeapName;
+			earshotPath.replace_extension(modextension);
+			if (fs::exists(earshotPath)) return earshotPath;
+		}
+	}
+
+	for (const auto& info : weaponNames) {
+		CPed* ped = nullptr;
+		if (audioentity && audioentity->m_nType == ENTITY_TYPE_PED)
+		{
+			ped = (CPed*)audioentity;
+		}
+		if (info.weapType == ped->GetWeapon()->m_eWeaponType) {
+			fs::path earshotPath = audiopath.parent_path() / info.weapName;
+			earshotPath.replace_extension(modextension);
+			if (fs::exists(earshotPath)) return earshotPath;
+		}
+	}
+
+	return std::nullopt;
+}

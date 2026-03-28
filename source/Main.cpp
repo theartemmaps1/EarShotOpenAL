@@ -44,9 +44,8 @@
 // useles ans not neded
 //#include <libsndfile/include/sndfile.h>
 using namespace plugin;
-using namespace std;
-DebugMenuAPI gDebugMenuAPI;
 namespace fs = std::filesystem;
+DebugMenuAPI gDebugMenuAPI;
 Buffers g_Buffers;
 
 #ifdef QUAKE_KILLSOUNDS_TEST
@@ -162,7 +161,7 @@ void __cdecl HookedRegisterKillByPlayer(const CPed* killedPed, eWeaponType damag
 				default:
 					break;
 				}
-				Log("Killstreak: %d", killCounter);
+				LOG("Killstreak: %d", killCounter);
 				if (newBuffer != 0) {
 					buffer = newBuffer;
 					AudioManager.PlaySource2D(buffer, true, AEAudioHardware.m_fEffectMasterScalingFactor * 0.3f, CTimer::ms_fTimeScale);
@@ -174,20 +173,20 @@ void __cdecl HookedRegisterKillByPlayer(const CPed* killedPed, eWeaponType damag
 }
 #endif
 
-auto __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
+void __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 	CAEWeaponAudioEntity* thispointer, void* unused,
 	eWeaponType weaponType, CPhysical* victim, int audioEventId
 ) {
-	Log("HookedCAEWeaponAudioEntity__WeaponFire: audioEvent %d weaponType %d", audioEventId, weaponType);
+	LOG("audioEvent %d weaponType %d", audioEventId, weaponType);
 	CWeapon* weap = nullptr;
 	CWeaponInfo* info = nullptr;
-	if (thispointer->m_pPed && IsPedPointerValid(thispointer->m_pPed))
+	if (thispointer->m_pPed && IsPedPointerValid(thispointer->m_pPed) && thispointer->m_pPed->GetWeapon())
 	{
 		weap = thispointer->m_pPed->GetWeapon();
 		info = CWeaponInfo::GetWeaponInfo(weap->m_eWeaponType, thispointer->m_pPed->GetWeaponSkill());
 	}
 	if (!thispointer) {
-		Log("WeaponFire: thispointer is null, falling back.");
+		LOG("thispointer is null, falling back.");
 		subhook_remove(subhookCAEWeaponAudioEntity__WeaponFire);
 		thispointer->WeaponFire(weaponType, victim, audioEventId);
 		subhook_install(subhookCAEWeaponAudioEntity__WeaponFire);
@@ -205,26 +204,11 @@ auto __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 		entity = victim;
 	}
 	if (!IsEntityPointerValid(entity)) {
-		Log("WeaponFire: no valid entity found, falling back.");
+		LOG("no valid entity found, falling back.");
 		subhook_remove(subhookCAEWeaponAudioEntity__WeaponFire);
 		thispointer->WeaponFire(weaponType, victim, audioEventId);
 		subhook_install(subhookCAEWeaponAudioEntity__WeaponFire);
 		return;
-	}
-
-	// Handle minigun barrel spinning
-	if (audioEventId == 151) {
-		if (AudioManager.findWeapon(&weaponType, eModelID(-1), "spin", thispointer->m_pPed, false)) {
-			AudioManager.PlayOrStopBarrelSpinSound(thispointer->m_pPed, &weaponType, true);
-			return;
-		}
-		else {
-			Log("HookedCAEWeaponAudioEntity__WeaponFire: spin not found");
-			subhook_remove(subhookCAEWeaponAudioEntity__WeaponFire);
-			thispointer->WeaponFire(weaponType, victim, 151);
-			subhook_install(subhookCAEWeaponAudioEntity__WeaponFire);
-			return;
-		}
 	}
 
 	float dist = DistanceBetweenPoints(cameraposition, entity->GetPosition());
@@ -261,8 +245,11 @@ auto __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 	for (int i = 0; i < MAX_SOUND_ALTERNATIVES; ++i) {
 		std::string altShoot = "shoot" + std::to_string(i);
 		std::string altAfter = "after" + std::to_string(i);
-		if (AUDIOPLAY(entity->m_nModelIndex, altShoot) &&
-			AUDIOPLAY(entity->m_nModelIndex, altAfter)) {
+		if (AUDIOPLAY(entity->m_nModelIndex, altShoot)) {
+			if (CGame::currArea <= 0) 
+			{
+				AUDIOPLAY(entity->m_nModelIndex, altAfter);
+			}
 			alternatePlayed = true;
 			break;
 		}
@@ -271,7 +258,7 @@ auto __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 	// If no alt sounds played, play singular shooting sounds
 	if (!alternatePlayed) {
 		if (AUDIOCALL(AUDIOSHOOT)) alternatePlayed = true;
-		if (AUDIOCALL(AUDIOAFTER)) alternatePlayed = true;
+		if (CGame::currArea <= 0 && AUDIOCALL(AUDIOAFTER)) alternatePlayed = true;
 		if (alternatePlayed) return;
 	}
 
@@ -279,20 +266,20 @@ auto __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 		return;
 	}
 	// Fallback to OG func if failed to play something
-	Log("HookedCAEWeaponAudioEntity__WeaponFire: fallback");
+	LOG("fallback");
 	subhook_remove(subhookCAEWeaponAudioEntity__WeaponFire);
 	thispointer->WeaponFire(weaponType, victim, audioEventId);
 	subhook_install(subhookCAEWeaponAudioEntity__WeaponFire);
 }
 
-auto __fastcall HookedCAEWeaponAudioEntity__WeaponReload(CAEWeaponAudioEntity* thispointer, void* unusedpointer,
+void __fastcall HookedCAEWeaponAudioEntity__WeaponReload(CAEWeaponAudioEntity* thispointer, void* unusedpointer,
 	eWeaponType weaponType, CPhysical* entity, int audioEventId
 ) {
-	Log("HookedCAEWeaponAudioEntity__WeaponReload: weaponType: %d, audioEventId: %d", weaponType, audioEventId);
+	LOG("HookedCAEWeaponAudioEntity__WeaponReload: weaponType: %d, audioEventId: %d", weaponType, audioEventId);
 	if (thispointer && entity)
 	{
 		switch (audioEventId) {
-			// Some weapons have two reload sounds, take them in account too
+		// Some weapons have two reload sounds, take them in account too
 		case AE_WEAPON_RELOAD_A: // reload one
 			if (AUDIOCALL(AUDIORELOAD1))
 			{
@@ -313,13 +300,13 @@ auto __fastcall HookedCAEWeaponAudioEntity__WeaponReload(CAEWeaponAudioEntity* t
 			break;
 		}
 	}
-	Log("HookedCAEWeaponAudioEntity__WeaponReload: fallback");
+	LOG("fallback");
 	subhook_remove(subhookCAEWeaponAudioEntity__WeaponReload);
 	thispointer->WeaponReload(weaponType, entity, audioEventId);
 	subhook_install(subhookCAEWeaponAudioEntity__WeaponReload);
 }
 // a2 is the audioevent
-auto __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispointer, void* unusedpointer,
+void __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispointer, void* unusedpointer,
 	int AudioEvent, CPhysical* victim, uint8_t Surface, float volume, uint32_t maxVolume
 ) {
 	//	if (!thispointer || !thispointer->m_pPed)
@@ -327,8 +314,9 @@ auto __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispoi
 	CPhysical* entity = victim;
 	CPed* ped = thispointer->m_pPed;
 	eWeaponType weaponType = ped->m_aWeapons[ped->m_nSelectedWepSlot].m_eWeaponType;
+	gentInfo[ped] = Surface;
 	//auto task = entity->m_pIntelligence->GetTaskFighting();
-	Log("HookedCAEPedAudioEntity__HandlePedHit: AudioEvent: %d, Surface: %d, volume: %.f, maxVolume: %d, weaponType: %d, victim model ID: %d",
+	LOG("AudioEvent: %d, Surface: %d, volume: %.f, maxVolume: %d, weaponType: %d, victim model ID: %d",
 		AudioEvent, Surface, volume, maxVolume, weaponType, victim ? victim->m_nModelIndex : -1);
 	// door surface(?): 43
 	// special door model: 1532 (has default surface by default, why?)
@@ -346,31 +334,31 @@ auto __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispoi
 		{
 			// Martial attacks
 			if (AudioEvent == AE_PED_HIT_MARTIAL_PUNCH && AUDIOCALL(AUDIOMARTIALPUNCH)) {
-				Log("AUDIOMARTIALPUNCH success");
+				LOG("AUDIOMARTIALPUNCH success");
 				handled = true;
 			}
 			if (!handled && AudioEvent == AE_PED_HIT_MARTIAL_KICK && AUDIOCALL(AUDIOMARTIALKICK)) {
-				Log("AUDIOMARTIALKICK success");
+				LOG("AUDIOMARTIALKICK success");
 				handled = true;
 			}
 
 			// Surface-specific
 			if (!handled && metalSurface && AUDIOCALL(AUDIOHITMETALT)) {
-				Log("AUDIOHITMETALT success");
+				LOG("AUDIOHITMETALT success");
 				handled = true;
 			}
 			if (!handled && woodSurface && AUDIOCALL(AUDIOHITWOOD)) {
-				Log("AUDIOHITWOOD success");
+				LOG("AUDIOHITWOOD success");
 				handled = true;
 			}
 			if (!handled && (AudioEvent == AE_PED_HIT_GROUND || AudioEvent == AE_PED_HIT_GROUND_KICK) && AUDIOCALL(AUDIOHITGROUND)) {
-				Log("AUDIOHITGROUND success");
+				LOG("AUDIOHITGROUND success");
 				handled = true;
 			}
 
 			// Fallback for hitting flesh
 			if (!handled && !woodSurface && (victim && victim->m_nType == ENTITY_TYPE_PED) && IsFleshy(Surface) && AUDIOCALL(AUDIOHIT)) {
-				Log("AUDIOHIT fallback success");
+				LOG("AUDIOHIT fallback success");
 				handled = true;
 			}
 
@@ -378,14 +366,14 @@ auto __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispoi
 		}
 
 		default:
-			Log("Unhandled AudioEvent %d", AudioEvent);
+			LOG("Unhandled AudioEvent %d", AudioEvent);
 			break;
 		}
 	}
 
 
 	if (!handled) {
-		Log("Falling back to original HandlePedHit");
+		LOG("Falling back to original HandlePedHit");
 		subhook_remove(subhookCAEPedAudioEntity__HandlePedHit);
 		plugin::CallMethod<0x4E1CC0, CAEPedAudioEntity*, int, CPhysical*, uint8_t, float, uint32_t>(
 			thispointer, AudioEvent, victim, Surface, volume, maxVolume);
@@ -394,15 +382,17 @@ auto __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispoi
 }
 
 // Custom ricochet sounds
-auto __fastcall HookedCAudioEngine__ReportBulletHit(CAudioEngine* engine, int, CEntity* victim, uint8_t surface, const CVector& posn, float angleWithColPointNorm)
+int __fastcall HookedCAudioEngine__ReportBulletHit(CAudioEngine* engine, int, CEntity* victim, uint8_t surface, const CVector& posn, float angleWithColPointNorm)
 {
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
-	//float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
-	//float audiovolume = AEAudioHardware.m_fEffectMasterScalingFactor * fader;
+	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	gameVol *= fader;
 	// cast to uint8_t to avoid garbage values like "-60030976" or "309067776", etc.
 	//uint8_t actualSurface = static_cast<uint8_t>(surface);
+
 	if (engine && surface >= 0 && surface <= TOTAL_NUM_SURFACE_TYPES /*&& victim*/) {
-		Log("HookedCAudioEngine__ReportBulletHit: surface %d", surface);
+		LOG("surface %d", surface);
 		std::string surfaceType = "default";
 		bool surfaceResolved = false;
 
@@ -454,7 +444,7 @@ auto __fastcall HookedCAudioEngine__ReportBulletHit(CAudioEngine* engine, int, C
 			auto& defBuf = g_Buffers.ricochetBuffersPerMaterial["default"];
 			if (!defBuf.empty()) {
 				buffers = defBuf;
-				Log("Fallback to default ricochet sounds");
+				LOG("Fallback to default ricochet sounds");
 			}
 		}
 
@@ -466,12 +456,16 @@ auto __fastcall HookedCAudioEngine__ReportBulletHit(CAudioEngine* engine, int, C
 			ALuint ricochetBuf = buffers[index];
 			SoundInstanceSettings opts;
 
-			opts.maxDist = 50.0f;
-			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-			opts.airAbsorption = 3.0f;
-			opts.refDist = 3.5f;
-			opts.rollOffFactor = 5.0f;
-			opts.pitch = pitch;
+			opts.maxDist = gAttenuationSettings.ricochet[surface].maxDist; // 50.0f
+			opts.gain = gameVol;
+			opts.airAbsorption = gAttenuationSettings.ricochet[surface].airAbsorption; // 3.0f
+			opts.refDist = gAttenuationSettings.ricochet[surface].refDist; // 3.5f
+			opts.rollOffFactor = gAttenuationSettings.ricochet[surface].rolloffFactor; // 5.0f
+			if (gPitches.ricochet[surface].has_value())
+			{
+				opts.readPitchFromFile = gPitches.ricochet[surface].has_value();
+				opts.readPitch = *gPitches.ricochet[surface];
+			}
 			opts.pos = posn;
 			AudioManager.PlaySource(ricochetBuf, opts);
 
@@ -481,7 +475,7 @@ auto __fastcall HookedCAudioEngine__ReportBulletHit(CAudioEngine* engine, int, C
 
 	//if (surface <= TOTAL_NUM_SURFACE_TYPES) 
 //	{
-	Log("HookedCAudioEngine__ReportBulletHit: fallback to vanilla for surface %d", surface);
+	LOG("fallback to vanilla for surface %d", surface);
 	subhook_remove(subhookCAudioEngine__ReportBulletHit);
 	auto returnvalue = CallMethodAndReturn<int, 0x506EC0, CAudioEngine*, CEntity*, uint8_t, const CVector&, float>(
 		engine, victim, surface, posn, angleWithColPointNorm);
@@ -492,10 +486,10 @@ auto __fastcall HookedCAudioEngine__ReportBulletHit(CAudioEngine* engine, int, C
 }
 
 
-auto __fastcall HookedCAEPedAudioEntity__HandlePedSwing(CAEPedAudioEntity* thispointer, void* unusedpointer,
+char __fastcall HookedCAEPedAudioEntity__HandlePedSwing(CAEPedAudioEntity* thispointer, void* unusedpointer,
 	int a2, int a3, int a4
 ) {
-	Log("HookedCAEPedAudioEntity__HandlePedSwing: audio event %d", a2);
+	LOG("audio event %d", a2);
 	if (
 		thispointer
 		//&&	
@@ -517,112 +511,119 @@ auto __fastcall HookedCAEPedAudioEntity__HandlePedSwing(CAEPedAudioEntity* thisp
 
 	return returnvalue;
 }
-auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
+void __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 	CAEExplosionAudioEntity* t,
 	void* unusedpointer,
 	int Aevent,
 	CVector* posn,
 	float volume
 ) {
-	Log("HookedCAEExplosionAudioEntity_AddAudioEvent: event %d volume %.2f", Aevent, volume);
+	LOG("event %d volume %.2f", Aevent, volume);
 
 	float dist = DistanceBetweenPoints(cameraposition, *posn);
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	float gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+	gain *= fader;
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
-	// We only process those that aren't really far away (except for distant sounds)
+	// We only process those that aren't really far away (except for distant explosions)
 	bool farAway = dist >= distanceForDistantExplosion;
 	bool handled = false;
 	float waterLevel = 0.0f;
+	int lastExplosionType = 0;
+	for (auto& data : g_lastExplosionType) 
+	{
+		lastExplosionType = data.second;
+		break;
+	}
+	bool notAMolotov = lastExplosionType != EXPLOSION_MOLOTOV;
 	bool isUnderWater = CWaterLevel::GetWaterLevelNoWaves(posn->x, posn->y, posn->z, &waterLevel);
 	auto OG = [&]()
 		{
-			Log("HookedCAEExplosionAudioEntity_AddAudioEvent: fallback to vanilla");
+			LOG("fallback to vanilla");
 			subhook_remove(subhookCAEExplosionAudioEntity__AddAudioEvent);
 			plugin::CallMethod<0x4DCBE0, CAEExplosionAudioEntity*, int, CVector*, float>(t, Aevent, posn, volume);
 			subhook_install(subhookCAEExplosionAudioEntity__AddAudioEvent);
 		};
 
-
-	auto chooseBuffers = [](auto& explosionContainer,
-		/*auto& weaponContainer,*/
+	auto chooseBuffers = [&](auto& explosionContainer,
 		const std::vector<ALuint>* genericFallback, const char* what)
 		-> const std::vector<ALuint>*
 		{
 			// --- Explosion types ---
-				for (auto& data : g_lastExplosionType) {
-					int expType = data.second;
-					auto it = explosionContainer.find(expType);
-					if (it != explosionContainer.end() && !it->second.empty()) {
-						Log("HookedCAEExplosionAudioEntity_AddAudioEvent: Using ExplosionType: %d for: %s", expType, what);
-						return &it->second;
-					}
+			for (auto& data : g_lastExplosionType) {
+				int expType = data.second;
+				auto it = explosionContainer.find(expType);
+				if (it != explosionContainer.end() && !it->second.empty()) {
+					LOG("Using ExplosionType: %d for: %s", expType, what);
+					return &it->second;
 				}
+			}
 
 			// --- Generic fallback ---
-			if (genericFallback && !genericFallback->empty()) {
-				Log("HookedCAEExplosionAudioEntity_AddAudioEvent: Using generic fallback for %s", what);
+			if (genericFallback && !genericFallback->empty() && notAMolotov) {
+				LOG("Using generic fallback for %s", what);
 				return genericFallback;
 			}
-			if (what != "debris" && what != "distant explosion")
-			{
-				Log("No buffers at all for main explosion, falling back to vanilla");
-			}
-			else {
-				Log("No buffers at all for %s, ignoring...", what);
-			}
+
+			LOG("No buffers at all for %s, ignoring...", what);
 			return nullptr;
 		};
 
 	auto* explosionUnderwaterBuffers =
 		chooseBuffers(g_Buffers.ExplosionTypeUnderwaterBuffers,
-			/*g_Buffers.WeaponTypeExplosionBuffers,*/
 			&g_Buffers.explosionUnderwaterBuffers, "underwater explosion");
 
 	if (!farAway) {
 		// Underwater explosion
-		if (isUnderWater && posn->z < waterLevel && explosionUnderwaterBuffers) {
+		if (isUnderWater && posn->z < waterLevel - 3.0f && explosionUnderwaterBuffers) {
 			RandomIntegers rnd(explosionUnderwaterBuffers->size());
 			auto inst = std::make_shared<SoundInstance>();
 			int id = rnd.next();
 			ALuint buff = (*explosionUnderwaterBuffers)[id];
 			SoundInstanceSettings opts;
 
-			opts.maxDist = 4000.0f;
-			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor * 0.9f;
-			opts.airAbsorption = 3.0f;
-			opts.refDist = 15.0f;
-			opts.rollOffFactor = 0.20f;
+			opts.maxDist = gAttenuationSettings.underwater[lastExplosionType].maxDist; // 4000.0f
+			opts.gain = gain;
+			opts.airAbsorption = gAttenuationSettings.underwater[lastExplosionType].airAbsorption; // 3.0f
+			opts.refDist = gAttenuationSettings.underwater[lastExplosionType].refDist; // 15.0f
+			opts.rollOffFactor = gAttenuationSettings.underwater[lastExplosionType].rolloffFactor; // 0.20f
 			opts.pitch = pitch;
+			if (gPitches.underwater[lastExplosionType].has_value())
+			{
+				opts.readPitchFromFile = gPitches.underwater[lastExplosionType].has_value();
+				opts.readPitch = *gPitches.underwater[lastExplosionType];
+			}
 			opts.pos = *posn;
 			handled = AudioManager.PlaySource(buff, opts) != nullptr;
 		}
 		// Main explosion
 		else if (auto* explosionBuffers =
 			chooseBuffers(g_Buffers.ExplosionTypeExplosionBuffers,
-				/*g_Buffers.WeaponTypeExplosionBuffers,*/
-				&g_Buffers.explosionBuffers, "main explosion"))
+			&g_Buffers.explosionBuffers, "main explosion"))
 		{
 			RandomIntegers rnd(explosionBuffers->size());
 
 			int id = rnd.next();
 			ALuint buff = (*explosionBuffers)[id];
 			SoundInstanceSettings opts;
-			opts.maxDist = distanceForDistantExplosion;
-			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-			opts.airAbsorption = 0.6f;
-			opts.refDist = 10.0f;
-			opts.rollOffFactor = 0.7f;
+			opts.maxDist = gAttenuationSettings.explosion[lastExplosionType].maxDist; // notAMolotov ? distanceForDistantExplosion : FLT_MAX
+			opts.gain = gain;
+			opts.airAbsorption = gAttenuationSettings.explosion[lastExplosionType].airAbsorption; // 0.6f
+			opts.refDist = gAttenuationSettings.explosion[lastExplosionType].refDist;// notAMolotov ? 10.0f : 1.5f;
+			opts.rollOffFactor = gAttenuationSettings.explosion[lastExplosionType].rolloffFactor; // notAMolotov ? 0.7f : 1.3f;
 			opts.pitch = pitch;
+			if (gPitches.explosion[lastExplosionType].has_value())
+			{
+				opts.readPitchFromFile = gPitches.explosion[lastExplosionType].has_value();
+				opts.readPitch = *gPitches.explosion[lastExplosionType];
+			}
 			opts.pos = *posn;
 			handled = AudioManager.PlaySource(buff, opts) != nullptr;
 		}
-		//else {
-		//	OG();
-		//}
 
 		// Debris
 		if (auto* debrisBuffers =
 			chooseBuffers(g_Buffers.ExplosionTypeDebrisBuffers,
-				/*g_Buffers.WeaponTypeDebrisBuffers,*/
 				&g_Buffers.explosionsDebrisBuffers, "debris"))
 		{
 			RandomIntegers rnd(debrisBuffers->size());
@@ -630,12 +631,17 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 			int id = rnd.next();
 			ALuint buff = (*debrisBuffers)[id];
 			SoundInstanceSettings opts;
-			opts.maxDist = distanceForDistantExplosion;
-			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-			opts.airAbsorption = 0.8f;
-			opts.refDist = 7.0f;
-			opts.rollOffFactor = 1.0f;
+			opts.maxDist = gAttenuationSettings.debris[lastExplosionType].maxDist; // 100.0f
+			opts.gain = gain;
+			opts.airAbsorption = gAttenuationSettings.debris[lastExplosionType].airAbsorption; // 0.8f
+			opts.refDist = gAttenuationSettings.debris[lastExplosionType].refDist; // 7.0f
+			opts.rollOffFactor = gAttenuationSettings.debris[lastExplosionType].rolloffFactor; // 1.0f
 			opts.pitch = pitch;
+			if (gPitches.debris[lastExplosionType].has_value())
+			{
+				opts.readPitchFromFile = gPitches.debris[lastExplosionType].has_value();
+				opts.readPitch = *gPitches.debris[lastExplosionType];
+			}
 			opts.pos = *posn;
 			handled = AudioManager.PlaySource(buff, opts) != nullptr;
 		}
@@ -652,12 +658,17 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 			int id = rnd.next();
 			ALuint buff = (*distantBuffers)[id];
 			SoundInstanceSettings opts;
-			opts.maxDist = 200.0f;
-			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-			opts.airAbsorption = 0.6f;
-			opts.refDist = 20.0f;
-			opts.rollOffFactor = 0.5f;
+			opts.maxDist = gAttenuationSettings.distexplosion[lastExplosionType].maxDist; // 200.0f
+			opts.gain = gain;
+			opts.airAbsorption = gAttenuationSettings.distexplosion[lastExplosionType].airAbsorption; // 0.6f
+			opts.refDist = gAttenuationSettings.distexplosion[lastExplosionType].refDist; // 20.0f
+			opts.rollOffFactor = gAttenuationSettings.distexplosion[lastExplosionType].rolloffFactor; // 0.5f
 			opts.pitch = pitch;
+			if (gPitches.distexplosion[lastExplosionType].has_value())
+			{
+				opts.readPitchFromFile = gPitches.distexplosion[lastExplosionType].has_value();
+				opts.readPitch = *gPitches.distexplosion[lastExplosionType];
+			}
 			opts.pos = *posn;
 			handled = AudioManager.PlaySource(buff, opts) != nullptr;
 		}
@@ -672,12 +683,14 @@ auto __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 
 }
 
-auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, int, int eventId, CVector* posn) {
+void __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, int, int eventId, CVector* posn) {
 	// Keep track of CAEFireAudioEntity to check FX existence later
 	if (std::find(g_Buffers.ent.begin(), g_Buffers.ent.end(), ts) == g_Buffers.ent.end()) {
 		g_Buffers.ent.push_back(ts);
 	}
-
+	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	gameVol *= fader;
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 
 	auto SafeDeleteInstanceSource = [&](std::shared_ptr<SoundInstance> inst) {
@@ -692,6 +705,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		inst->firePtr = nullptr;
 		inst->paused = false;
 		inst->isFire = false;
+		inst.reset();
 		};
 
 	auto EnsureNonFireInstanceValid = [&](int evt) -> bool {
@@ -701,7 +715,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		auto inst = it->second;
 		if (!inst) { g_Buffers.nonFireSounds.erase(it); return false; }
 
-		int state = AudioManager.GetSourceState(inst->source);
+		ALint state = AudioManager.GetSourceState(inst->source);
 		if (state == AL_STOPPED || state == -1) {
 			SafeDeleteInstanceSource(inst);
 			g_Buffers.nonFireSounds.erase(it);
@@ -759,6 +773,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 					}
 				}
 				else if (state == AL_STOPPED) {
+					LOG("Played cuz stopped");
 					alSourcePlay(inst->source);
 				}
 				return true;
@@ -770,14 +785,21 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		if (buf == 0) return false;
 
 		SoundInstanceSettings opts;
-		opts.maxDist = 200.0f;
-		opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-		opts.airAbsorption = 4.0f;
-		opts.refDist = 1.0f;
-		opts.rollOffFactor = 1.5f;
+		opts.maxDist = gAttenuationSettings.nonfire.maxDist; // 200.0f
+		opts.gain = gameVol;
+		opts.airAbsorption = gAttenuationSettings.nonfire.airAbsorption; // 4.0f
+		opts.refDist = gAttenuationSettings.nonfire.refDist; // 1.0f
+		opts.rollOffFactor = gAttenuationSettings.nonfire.rolloffFactor; // 1.5f
 		opts.pitch = pitch;
+		if (gPitches.nonfire.has_value())
+		{
+			opts.readPitchFromFile = gPitches.nonfire.has_value();
+			opts.readPitch = *gPitches.nonfire;
+		}
 		opts.pos = position;
 		opts.isFire = false;
+		opts.fireFX = ts->field_84;
+		opts.firePtr = nullptr;
 		opts.fireEventID = evt;
 		opts.looping = true;
 		bool ok = AudioManager.PlaySource(buf, opts) != nullptr;
@@ -815,12 +837,17 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		if (buf == 0) return false;
 
 		SoundInstanceSettings opts;
-		opts.maxDist = 200.0f;
-		opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-		opts.airAbsorption = 4.0f;
-		opts.refDist = 1.0f;
-		opts.rollOffFactor = 1.5f;
+		opts.maxDist = gAttenuationSettings.fire.maxDist; // 200.0f
+		opts.gain = gameVol;
+		opts.airAbsorption = gAttenuationSettings.fire.airAbsorption; // 4.0f
+		opts.refDist = gAttenuationSettings.fire.refDist; // 1.0f
+		opts.rollOffFactor = gAttenuationSettings.fire.rolloffFactor; // 1.5f
 		opts.pitch = pitch;
+		if (gPitches.fire.has_value())
+		{
+			opts.readPitchFromFile = gPitches.fire.has_value();
+			opts.readPitch = *gPitches.fire;
+		}
 		opts.pos = pos;
 		opts.isFire = true;
 		opts.firePtr = fire;
@@ -876,7 +903,7 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 		}
 	}
 
-	// Nothing worked out, call OG
+	// Something hasn't worked out, call OG
 	if (!handled) {
 		subhook_remove(subhookCAEFireAudioEntity__AddAudioEvent);
 		plugin::CallMethod<0x4DD3C0, CAEFireAudioEntity*, int, CVector*>(ts, eventId, posn);
@@ -884,39 +911,28 @@ auto __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, 
 	}
 }
 
-
-// Forgive my retarded method, but at least it works just how i wanted it to :(
 void __fastcall PlayMinigunBarrelStopSound(CAEWeaponAudioEntity* ts, int, CPed* ped)
 {
-	//	ts->PlayMiniGunStopSound(ped);
-	if (ts->m_pPed) {
-		eWeaponType weapon = ts->m_pPed->m_aWeapons[ts->m_pPed->m_nSelectedWepSlot].m_eWeaponType;
-		CWeaponInfo* weapInfo = CWeaponInfo::GetWeaponInfo(weapon, WEAPSKILL_STD);
-		unsigned int anim = weapInfo->m_nAnimToPlay;
-		bool isMinigun = (weapon == WEAPONTYPE_MINIGUN ||
-			(anim == ANIM_GROUP_FLAME && weapInfo->m_nWeaponFire == WEAPON_FIRE_INSTANT_HIT));
-		if (!isMinigun) {
-			// Not minigun, block vanilla stop sound entirely
-			Log("PlayMinigunBarrelStopSound: Ignored, not minigun");
-			ts->PlayMiniGunStopSound(ped);
-			return;
-		}
-
-		if (AudioManager.findWeapon(&weapon, eModelID(-1), "spin_end", ts->m_pPed, false)) {
-			AudioManager.PlayOrStopBarrelSpinSound(ts->m_pPed, &weapon, false, false);
-			//	ts->PlayMiniGunStopSound(ped);
-			Log("PlayMinigunBarrelStopSound: Custom spin_end found, skipping vanilla");
+	// play the stop sound ONCE
+	if (ped)
+	{
+		eWeaponType weaponType = ped->GetWeapon()->m_eWeaponType;
+		bool foundSound = AudioManager.findWeapon(&weaponType, eModelID(-1), "minigun_barrelspinend", ped, false);
+		if (foundSound) 
+		{
+			AudioManager.PlayOrStopBarrelSpinSound(ped, &weaponType, false, true, true);
 			return;
 		}
 	}
-	Log("PlayMinigunBarrelStopSound fallback: no custom spin_end, using vanilla");
 	ts->PlayMiniGunStopSound(ped);
 }
 
-auto __fastcall CAEPedAudioEntity__HandlePedJacked(CAEPedAudioEntity* ts, void*, int AudioEvent)
+char __fastcall CAEPedAudioEntity__HandlePedJacked(CAEPedAudioEntity* ts, void*, int AudioEvent)
 {
-	Log("CAEPedAudioEntity__HandlePedJacked: AudioEvent is %d", AudioEvent);
-
+	LOG("AudioEvent is %d", AudioEvent);
+	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	gameVol *= fader;
 	if (/*!cameraposition ||*/ !ts || !ts->m_pPed) {
 		subhook_remove(subhookCAEPedAudioEntity__HandlePedJacked);
 		char returnvalue = CallMethodAndReturn<char, 0x4E2350, CAEPedAudioEntity*, int>(ts, AudioEvent);
@@ -938,12 +954,17 @@ auto __fastcall CAEPedAudioEntity__HandlePedJacked(CAEPedAudioEntity* ts, void*,
 		ALuint buf = bufferList[idx];
 		// recheck vol
 		SoundInstanceSettings opts;
-		opts.maxDist = FLT_MAX;
-		opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-		opts.airAbsorption = 0.8f;
-		opts.refDist = 3.0f;
-		opts.rollOffFactor = 1.5f;
+		opts.maxDist = gAttenuationSettings.jacked.maxDist; // FLT_MAX
+		opts.gain = gameVol;
+		opts.airAbsorption = gAttenuationSettings.jacked.airAbsorption; // 0.8f
+		opts.refDist = gAttenuationSettings.jacked.refDist; // 3.0f
+		opts.rollOffFactor = gAttenuationSettings.jacked.rolloffFactor; // 1.5f
 		opts.pitch = pitch;
+		if (gPitches.jacked.has_value())
+		{
+			opts.readPitchFromFile = gPitches.jacked.has_value();
+			opts.readPitch = *gPitches.jacked;
+		}
 		opts.pos = PedPos;
 		if (AudioManager.PlaySource(buf, opts))
 		{
@@ -954,23 +975,23 @@ auto __fastcall CAEPedAudioEntity__HandlePedJacked(CAEPedAudioEntity* ts, void*,
 
 	switch (AudioEvent) {
 	case AE_PED_JACKED_CAR_PUNCH: // Jacked: punch
-		Log("Playing jacked punch sound");
+		LOG("Playing jacked punch sound");
 		handled = PlayJackingSound(g_Buffers.carJackBuff);
 		break;
 	case AE_PED_JACKED_CAR_HEAD_BANG: // Head bang
-		Log("Playing jacked headbang sound");
+		LOG("Playing jacked headbang sound");
 		handled = PlayJackingSound(g_Buffers.carJackHeadBangBuff);
 		break;
 	case AE_PED_JACKED_CAR_KICK: // Kick
-		Log("Playing jacked kick sound");
+		LOG("Playing jacked kick sound");
 		handled = PlayJackingSound(g_Buffers.carJackKickBuff);
 		break;
 	case AE_PED_JACKED_BIKE: // Bike
-		Log("Playing jacked bike sound");
+		LOG("Playing jacked bike sound");
 		handled = PlayJackingSound(g_Buffers.carJackBikeBuff);
 		break;
 	case AE_PED_JACKED_DOZER: // Dozer
-		Log("Playing jacked dozer sound");
+		LOG("Playing jacked dozer sound");
 		handled = PlayJackingSound(g_Buffers.carJackBulldozerBuff);
 		break;
 	}
@@ -983,16 +1004,20 @@ auto __fastcall CAEPedAudioEntity__HandlePedJacked(CAEPedAudioEntity* ts, void*,
 	}
 }
 
-
 // footsteps
-auto __fastcall HookedCAEPedAudioEntity__AddAudioEvent(CAEPedAudioEntity* ts, void*, eAudioEvents audioEvent, float volume, float speed, CPhysical* ped, uint8_t surfaceId, int32_t a7, uint32_t maxVol)
+void __fastcall HookedCAEPedAudioEntity__AddAudioEvent(CAEPedAudioEntity* ts, void*, eAudioEvents audioEvent, float volume, float speed, CPhysical* ped, uint8_t surfaceId, int32_t a7, uint32_t maxVol)
 {
+	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	gameVol *= fader;
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+	float FinalPitch = pitch;
+	bool PitchReadFromFile = false;
 	if (ts && ts->m_pPed) {
-		auto pedPtr = ts->m_pPed;
+		CPed* pedPtr = ts->m_pPed;
 		eSurfaceType actualSurface = eSurfaceType(pedPtr->m_nContactSurface);
 
-		if (actualSurface <= TOTAL_NUM_SURFACE_TYPES && (audioEvent == 54 || audioEvent == 55)) {
+		if (actualSurface <= TOTAL_NUM_SURFACE_TYPES && (audioEvent == AE_PED_FOOTSTEP_LEFT || audioEvent == AE_PED_FOOTSTEP_RIGHT)) {
 			std::string surfaceType = "default";
 
 			switch (actualSurface) {
@@ -1011,15 +1036,23 @@ auto __fastcall HookedCAEPedAudioEntity__AddAudioEvent(CAEPedAudioEntity* ts, vo
 				else if (IsAudioTile(actualSurface)) surfaceType = "tile";
 				break;
 			}
-
+			LOG("Current surface type for footsteps: %s, ID %d", surfaceType.c_str(), actualSurface);
 			std::string shoeType = "default";
-			auto* clothesDesc = pedPtr->m_pPlayerData ? pedPtr->m_pPlayerData->m_pPedClothesDesc : nullptr;
+			std::string shoeTexture = "default";
+			CPedClothesDesc* clothesDesc = pedPtr->m_pPlayerData ? pedPtr->m_pPlayerData->m_pPedClothesDesc : nullptr;
 
 			if (clothesDesc) {
-				int modelId = clothesDesc->m_anModelKeys[4]; // 4 for shoes
+				unsigned int modelId = clothesDesc->m_anModelKeys[CLOTHES_MODEL_SHOES];
+				unsigned int texture = clothesDesc->m_anTextureKeys[CLOTHES_TEXTURE_SHOES];
 				for (const auto& [folder, surfaceMap] : g_Buffers.footstepShoeBuffers) {
 					if (CKeyGen::GetUppercaseKey(folder.c_str()) == modelId) {
 						shoeType = folder;
+						break;
+					}
+				}
+				for (const auto& [folder, textureMap] : g_Buffers.footstepShoeByTextureBuffers) {
+					if (CKeyGen::GetUppercaseKey(folder.c_str()) == texture) {
+						shoeTexture = folder;
 						break;
 					}
 				}
@@ -1032,6 +1065,15 @@ auto __fastcall HookedCAEPedAudioEntity__AddAudioEvent(CAEPedAudioEntity* ts, vo
 			if (shoeIt != g_Buffers.footstepShoeBuffers.end()) {
 				auto surfIt = shoeIt->second.find(surfaceType);
 				if (surfIt != shoeIt->second.end() && !surfIt->second.empty()) {
+					selected = &surfIt->second;
+				}
+			}
+
+			// Try to find a special shoe sound but by a texture this time
+			auto shoeTexIt = g_Buffers.footstepShoeByTextureBuffers.find(shoeTexture);
+			if (shoeTexIt != g_Buffers.footstepShoeByTextureBuffers.end()) {
+				auto surfIt = shoeTexIt->second.find(surfaceType);
+				if (surfIt != shoeTexIt->second.end() && !surfIt->second.empty()) {
 					selected = &surfIt->second;
 				}
 			}
@@ -1060,45 +1102,85 @@ auto __fastcall HookedCAEPedAudioEntity__AddAudioEvent(CAEPedAudioEntity* ts, vo
 				int index = rnd.next();
 				ALuint buffer = (*selected)[index];
 				//CVector position = pedPtr->GetPosition();
-				float referenceDistance;
+				float referenceDistance, maxDist, airAbs, rollOff;
 
 				if (pedPtr->IsPlayer()) {
 					if (pedPtr->bIsDucking) {
-						referenceDistance = 0.1f;
+						referenceDistance = gAttenuationSettings.footstepsPlayerDuck.refDist; // 0.1f
+						maxDist = gAttenuationSettings.footstepsPlayerDuck.maxDist;
+						airAbs = gAttenuationSettings.footstepsPlayerDuck.airAbsorption;
+						rollOff = gAttenuationSettings.footstepsPlayerDuck.rolloffFactor;
 					}
 					else if (pedPtr->m_nMoveState == PEDMOVE_SPRINT) {
-						referenceDistance = 1.0f;
+						referenceDistance = gAttenuationSettings.footstepsPlayerSprint.refDist; // 1.0f
+						maxDist = gAttenuationSettings.footstepsPlayerSprint.maxDist;
+						airAbs = gAttenuationSettings.footstepsPlayerSprint.airAbsorption;
+						rollOff = gAttenuationSettings.footstepsPlayerSprint.rolloffFactor;
 					}
 					else if (pedPtr->m_nMoveState == PEDMOVE_WALK) {
-						referenceDistance = 0.3f;
+						referenceDistance = gAttenuationSettings.footstepsPlayerWalk.refDist; // 0.3f
+						maxDist = gAttenuationSettings.footstepsPlayerWalk.maxDist;
+						airAbs = gAttenuationSettings.footstepsPlayerWalk.airAbsorption;
+						rollOff = gAttenuationSettings.footstepsPlayerWalk.rolloffFactor;
 					}
 					else {
-						referenceDistance = 0.5f;
+						LOG("after else if walk for player");
+						referenceDistance = gAttenuationSettings.footstepsPlayer.refDist; // 0.5f
+						maxDist = gAttenuationSettings.footstepsPlayer.maxDist;
+						airAbs = gAttenuationSettings.footstepsPlayer.airAbsorption;
+						rollOff = gAttenuationSettings.footstepsPlayer.rolloffFactor;
 					}
+					if (gPitches.footstepsPlayer.has_value())
+					{
+						PitchReadFromFile = gPitches.footstepsPlayer.has_value();
+						FinalPitch = *gPitches.footstepsPlayer;
+					}
+					LOG("Player move state: %d", pedPtr->m_nMoveState);
 				}
 				else {
 					if (pedPtr->bIsDucking) {
-						referenceDistance = 0.1f;
+						referenceDistance = gAttenuationSettings.footstepsNPCDuck.refDist; // 0.1f
+						maxDist = gAttenuationSettings.footstepsNPCDuck.maxDist;
+						airAbs = gAttenuationSettings.footstepsNPCDuck.airAbsorption;
+						rollOff = gAttenuationSettings.footstepsNPCDuck.rolloffFactor;
 					}
 					else if (pedPtr->m_nMoveState == PEDMOVE_SPRINT) {
-						referenceDistance = 0.7f;
+						referenceDistance = gAttenuationSettings.footstepsNPCSprint.refDist; // 0.7f
+						maxDist = gAttenuationSettings.footstepsNPCSprint.maxDist;
+						airAbs = gAttenuationSettings.footstepsNPCSprint.airAbsorption;
+						rollOff = gAttenuationSettings.footstepsNPCSprint.rolloffFactor;
 					}
 					else if (pedPtr->m_nMoveState == PEDMOVE_WALK) {
-						referenceDistance = 0.2f;
+						referenceDistance = gAttenuationSettings.footstepsNPCWalk.refDist; // 0.2f
+						maxDist = gAttenuationSettings.footstepsNPCWalk.maxDist;
+						airAbs = gAttenuationSettings.footstepsNPCWalk.airAbsorption;
+						rollOff = gAttenuationSettings.footstepsNPCWalk.rolloffFactor;
 					}
 					else {
-						referenceDistance = 0.3f;
+						LOG("after else if walk for npc");
+						referenceDistance = gAttenuationSettings.footstepsNPC.refDist; // 0.3f
+						maxDist = gAttenuationSettings.footstepsNPC.maxDist;
+						airAbs = gAttenuationSettings.footstepsNPC.airAbsorption;
+						rollOff = gAttenuationSettings.footstepsNPC.rolloffFactor;
 					}
+					if (gPitches.footstepsNPC.has_value())
+					{
+						PitchReadFromFile = gPitches.footstepsNPC.has_value();
+						FinalPitch = *gPitches.footstepsNPC;
+					}
+					LOG("NPC move state: %d", pedPtr->m_nMoveState);
 				}
 				SoundInstanceSettings opts;
-				opts.maxDist = FLT_MAX;//pedPtr->IsPlayer() ? 140.0f : 150.0f;
-				opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-				opts.airAbsorption = pedPtr->IsPlayer() ? 1.5f : 3.0f;
+				opts.pos = pedPtr->GetPosition();
+				opts.maxDist = maxDist;//pedPtr->IsPlayer() ? 140.0f : 150.0f; (FLT_MAX prev)
+				opts.gain = gameVol;
+				opts.airAbsorption = airAbs; // pedPtr->IsPlayer() ? 1.5f : 3.0f;
 				opts.refDist = referenceDistance;
-				opts.rollOffFactor = pedPtr->IsPlayer() ? 1.5f : 2.5f;
+				opts.rollOffFactor = rollOff; // pedPtr->IsPlayer() ? 1.5f : 2.5f;
 				opts.pitch = pitch;
+				opts.readPitchFromFile = PitchReadFromFile;
+				opts.readPitch = FinalPitch;
 				opts.entity = pedPtr;
-				//opts.pos = position;
 				AudioManager.PlaySource(buffer, opts);
 				return;
 			}
@@ -1115,39 +1197,49 @@ auto __fastcall HookedCAEPedAudioEntity__AddAudioEvent(CAEPedAudioEntity* ts, vo
 void __fastcall HookedCAudioEngine__ReportWeaponEvent(CAudioEngine* engine, void*,
 	int32_t audioEvent, eWeaponType weaponType, CPhysical* physical)
 {
-	Log("HookedCAudioEngine__ReportWeaponEvent: event: %d, weapon type: %d physical model ID %d", audioEvent, weaponType, physical ? physical->m_nModelIndex : -1);
-	if (engine && physical) {
-		if (audioEvent == 145) // gun ambience in LS
-		{
-			if (AudioManager.PlayAmbienceSFX(physical->GetPosition(), weaponType, false))
-			{
-				Log("HookedCAudioEngine__ReportWeaponEvent: playing ambient sound");
-				return;
-			}
+	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	gameVol *= fader;
+
+	// get the vehicle that fired it's weapon
+	CVehicle* vehicle = nullptr;
+	for (int i = 0; i < CPools::ms_pVehiclePool->m_nSize; i++) {
+		CVehicle* veh = CPools::ms_pVehiclePool->GetAt(i);
+		if (veh && veh->m_nVehicleWeaponInUse) {
+			vehicle = veh;
+			break;
 		}
 	}
-	Log("HookedCAudioEngine__ReportWeaponEvent: fallback");
-	CallMethod<0x506F40, CAudioEngine*, int32_t, eWeaponType, CPhysical*>(engine, audioEvent, weaponType, physical);
-}
 
-// Missile flying sound
-char __fastcall HookedFireProjectile(
-	void* ts, int,
-	eWeaponType weaponType, CPhysical* physical, eAudioEvents aEvent)
-{
-	//g_lastWeaponType[physical] = (int)weaponType;
-	Log("HookedFireProjectile: weaponType '%d', audio event '%d', physical model index '%d'", weaponType, aEvent, physical ? physical->m_nModelIndex : -1);
-	CVehicle* playaVehicle = FindPlayerVehicle();
+	// store info about the vehicle firing the weapon, if not yet
+	if (vehicle)
+	{
+		vehInfo info{};
+		info.model = vehicle->m_nModelIndex;
+		info.weap = weaponType;
+		gvehInfo[vehicle] = info;
+		LOG("in a veh, model index: %d", vehicle->m_nModelIndex);
+	}
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 	bool handled = false;
-	if (ts) {
+	LOG("event: %d, weapon type: %d physical model ID %d", audioEvent, weaponType, physical ? physical->m_nModelIndex : -1);
+	if (engine && physical) {
+		switch (audioEvent) {
+		case AE_WEAPON_FIRE: // gun ambience in LS
 
-		if (aEvent == 0x94) // projectile fire event
-		{
-
-			if (playaVehicle && AudioManager.findWeapon(&weaponType, eModelID(playaVehicle->m_nModelIndex), "projfire", playaVehicle))
+			if (AudioManager.PlayAmbienceSFX(physical->GetPosition(), weaponType, false))
 			{
-				Log("HookedFireProjectile: playing rocket fire sound for vehicle model '%d'", playaVehicle->m_nModelIndex);
+				LOG("playing ambient sound");
+				handled = true;
+			}
+			break;
+
+		case AE_PROJECTILE_FIRE: // projectile fire event
+
+
+			if (vehicle && AudioManager.findWeapon(&weaponType, eModelID(vehicle->m_nModelIndex), "projfire", vehicle))
+			{
+				LOG("playing rocket fire sound for vehicle model '%d'", vehicle->m_nModelIndex);
 				//return char(-1);
 				handled = true;
 			}
@@ -1163,11 +1255,95 @@ char __fastcall HookedFireProjectile(
 						int index = rnd.next();
 						ALuint buff = g_Buffers.missileSoundBuffers[index];
 						SoundInstanceSettings opts;
-						opts.maxDist = 250.0f;
-						opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-						opts.airAbsorption = 1.0f;
-						opts.refDist = 6.0f;
-						opts.rollOffFactor = 1.0f;
+						opts.maxDist = gAttenuationSettings.missile.maxDist; // 250.0f
+						opts.gain = gameVol;
+						opts.airAbsorption = gAttenuationSettings.missile.airAbsorption; // 1.0f
+						opts.refDist = gAttenuationSettings.missile.refDist; // 6.0f
+						opts.rollOffFactor = gAttenuationSettings.missile.rolloffFactor; // 1.0f
+						opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+						if (gPitches.missile.has_value())
+						{
+							opts.readPitchFromFile = gPitches.missile.has_value();
+							opts.readPitch = *gPitches.missile;
+						}
+						opts.isMissile = true;
+						opts.weaponType = weaponType;
+						opts.pos = physical->GetPosition();
+						opts.entity = physical;
+						AudioManager.PlaySource(buff, opts);
+						//return char(-1);
+						handled = true;
+					}
+				}
+			}
+			break;
+
+		}
+	}
+	if (!handled)
+	{
+		LOG("fallback");
+		subhook_remove(subhookCAudioEngine__ReportWeaponEvent);
+		CallMethod<0x506F40, CAudioEngine*, int32_t, eWeaponType, CPhysical*>(engine, audioEvent, weaponType, physical);
+		subhook_install(subhookCAudioEngine__ReportWeaponEvent);
+	}
+}
+
+#if 0
+// Missile flying sound
+char __fastcall HookedFireProjectile(
+	void* ts, int,
+	eWeaponType weaponType, CPhysical* physical, eAudioEvents aEvent)
+{
+	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	gameVol *= fader;
+	//g_lastWeaponType[physical] = (int)weaponType;
+	LOG("weaponType '%d', audio event '%d', physical model index '%d'", weaponType, aEvent, physical ? physical->m_nModelIndex : -1);
+	CAEWeaponAudioEntity* entity = reinterpret_cast<CAEWeaponAudioEntity*>(ts);
+	CAEWeaponAudioEntity* entity2 = reinterpret_cast<CAEWeaponAudioEntity*>(AudioEngine.m_pWeaponAudio);
+	if (entity == entity2) {
+		if (entity2->m_pPed)
+		{
+			LOG("entity ped model index: %d", entity2->m_pPed ? entity2->m_pPed->m_nModelIndex : -1);
+		}
+		if (entity2->m_pPed && entity2->m_pPed->m_pVehicle)
+		{
+			LOG("in a veh, model index: %d", entity2->m_pPed->m_pVehicle->m_nModelIndex);
+		}
+		LOG("ts is not null");
+	}
+	CVehicle* playaVehicle = FindPlayerVehicle();
+	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+	bool handled = false;
+	if (ts) {
+
+		if (aEvent == 0x94) // projectile fire event
+		{
+
+			if (playaVehicle && AudioManager.findWeapon(&weaponType, eModelID(playaVehicle->m_nModelIndex), "projfire", playaVehicle))
+			{
+				LOG("playing rocket fire sound for vehicle model '%d'", playaVehicle->m_nModelIndex);
+				//return char(-1);
+				handled = true;
+			}
+			// Custom missile fly sound
+			if (physical)
+			{
+				if (physical->m_nModelIndex == 345) { // missile model id
+					auto inst = std::make_shared<SoundInstance>();
+					if (inst->missileSource == 0 && !g_Buffers.missileSoundBuffers.empty())
+					{
+						RandomIntegers rnd(g_Buffers.missileSoundBuffers.size());
+
+						int index = rnd.next();
+						ALuint buff = g_Buffers.missileSoundBuffers[index];
+						SoundInstanceSettings opts;
+						opts.maxDist = gAttenuationSettings.missile.maxDist; // 250.0f
+						opts.gain = gameVol;
+						opts.airAbsorption = gAttenuationSettings.missile.airAbsorption; // 1.0f
+						opts.refDist = gAttenuationSettings.missile.refDist; // 6.0f
+						opts.rollOffFactor = gAttenuationSettings.missile.rolloffFactor; // 1.0f
 						opts.pitch = pitch;
 						opts.pos = physical->GetPosition();
 						opts.isMissile = true;
@@ -1184,16 +1360,17 @@ char __fastcall HookedFireProjectile(
 	}
 	if (!handled)
 	{
-		Log("HookedFireProjectile: fallback");
+		LOG("fallback");
 		//	g_lastWeaponType = -1;
 		return CallMethodAndReturn<char, 0x4DF060, void*, eWeaponType, CPhysical*, eAudioEvents>(ts, weaponType, physical, aEvent);
 	}
 }
+#endif
 
 // Custom thunders
 void __fastcall HookedCAEWeatherAudioEntity__AddAudioEvent(CAEWeatherAudioEntity* ts, void*, int AudioEvent)
 {
-	Log("HookedCAEWeatherAudioEntity__AddAudioEvent: event: %d", AudioEvent);
+	LOG("event: %d", AudioEvent);
 	if (ts && AudioEvent == 141) {
 		if (!g_Buffers.ThunderBuffs.empty())
 		{
@@ -1204,12 +1381,12 @@ void __fastcall HookedCAEWeatherAudioEntity__AddAudioEvent(CAEWeatherAudioEntity
 
 			if (AudioManager.PlayAmbienceBuffer(buffer, cameraposition, false, true))
 			{
-				Log("HookedCAudioEngine__ReportWeaponEvent: playing thunder sound");
+				LOG("playing thunder sound");
 				return;
 			}
 		}
 	}
-	Log("HookedCAEWeatherAudioEntity__AddAudioEvent: fallback");
+	LOG("fallback");
 	CallMethod<0x506800, CAEWeatherAudioEntity*, int>(ts, AudioEvent);
 }
 
@@ -1217,10 +1394,12 @@ void __fastcall HookedCAEWeatherAudioEntity__AddAudioEvent(CAEWeatherAudioEntity
 bool __cdecl TriggerTankFireHooked(CEntity* victim, CEntity* creator, eExplosionType type, CVector pos, uint32_t lifetime, uint8_t usesSound, float cameraShake, uint8_t bInvisible)
 {
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
-	Log("CExplosion::AddExplosion: added explosion with type %d", type);
+	LOG("added explosion with type %d", type);
 	// We'll reuse this later for explosion-type specific explosion sounds
 	g_lastExplosionType[creator] = static_cast<int>(type);
-
+	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	gameVol *= fader;
 	// Just to be sure
 	if (CPad::GetPad(0)->CarGunJustDown()) {
 		if (!g_Buffers.tankCannonFireBuffers.empty() && creator && creator->m_nType == ENTITY_TYPE_PED && ((CPed*)creator)->bInVehicle && type == EXPLOSION_TANK_FIRE)
@@ -1230,15 +1409,19 @@ bool __cdecl TriggerTankFireHooked(CEntity* victim, CEntity* creator, eExplosion
 			int index = rnd.next();
 			//int index = CGeneral::GetRandomNumber() % g_Buffers.tankCannonFireBuffers.size();
 			ALuint buffer = g_Buffers.tankCannonFireBuffers[index];
-			CVector pos = creator->GetPosition();
 			SoundInstanceSettings opts;
-			opts.maxDist = 125.0f;
-			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-			opts.airAbsorption = 0.3f;
-			opts.refDist = 3.5f;
-			opts.rollOffFactor = 0.3f;
+			opts.maxDist = gAttenuationSettings.tankcannon.maxDist; // 125.0f
+			opts.gain = gameVol;
+			opts.airAbsorption = gAttenuationSettings.tankcannon.airAbsorption; // 0.3f
+			opts.refDist = gAttenuationSettings.tankcannon.refDist; // 3.5f
+			opts.rollOffFactor = gAttenuationSettings.tankcannon.rolloffFactor; // 0.3f
 			opts.pitch = pitch;
-			opts.pos = pos;
+			if (gPitches.tankcannon.has_value())
+			{
+				opts.readPitchFromFile = gPitches.tankcannon.has_value();
+				opts.readPitch = *gPitches.tankcannon;
+			}
+			opts.entity = (CPhysical*)creator;
 			AudioManager.PlaySource(buffer, opts);
 		}
 	}
@@ -1254,7 +1437,7 @@ void __fastcall CAudioEngine__ReportFrontEndAudioHooked(CAudioEngine* eng, int, 
 	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
 	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
 	float audiovolume = AEAudioHardware.m_fEffectMasterScalingFactor * fader;
-	//Log("CAudioEngine__ReportFrontEndAudioHooked: event '%d'", eventId);
+	//LOG("CAudioEngine__ReportFrontEndAudioHooked: event '%d'", eventId);
 	std::vector<ALuint>* bufferList = nullptr;
 
 	switch (eventId) {
@@ -1281,7 +1464,7 @@ void __fastcall CAudioEngine__ReportFrontEndAudioHooked(CAudioEngine* eng, int, 
 		//int index = CGeneral::GetRandomNumber() % bufferList->size();
 		ALuint buffer = (*bufferList)[index];
 		AudioManager.PlaySource2D(buffer, true, audiovolume, pitch);
-		Log("CAudioEngine__ReportFrontEndAudioHooked: playing audio with event '%d'", eventId);
+		LOG("playing audio with event '%d'", eventId);
 		//AudioManager.audiosplaying.push_back(std::move(inst));
 		return;
 	}
@@ -1369,148 +1552,1154 @@ void ManageLastManAndTeamKill() {
 	prevMembersExcludingLeader = curr;
 }
 #endif
-
-//TODO
 void __fastcall PlayChainsawEvent(CAEWeaponAudioEntity* ts, int, CPed* ped, int Aevent)
 {
-	if (!ts || !ped)
-		return;
-
-
-		Log("Chainsaw event: %d | state: %d | time: %u",
-			Aevent, ts->m_nChainsawSoundState, ts->m_dwTimeChainsaw);
-
-	static ALuint s_idleBuf = 0;
-	static ALuint s_activeBuf = 0;
-	static ALuint s_cuttingBuf = 0;
-
-	if (!s_idleBuf)
-		s_idleBuf = AudioManager.CreateOpenALBufferFromAudioFile(foldermod / "chainsaw/idle.wav");
-	if (!s_activeBuf)
-		s_activeBuf = AudioManager.CreateOpenALBufferFromAudioFile(foldermod / "chainsaw/active.wav");
-	if (!s_cuttingBuf)
-		s_cuttingBuf = AudioManager.CreateOpenALBufferFromAudioFile(foldermod / "chainsaw/cutting.wav");
-
-	if (!s_idleBuf || !s_activeBuf || !s_cuttingBuf) {
-		Error("Failed to load one or more chainsaw sounds!");
-		ts->ReportChainsawEvent(ped, Aevent);
-		return;
+	//subhook_remove(subhookPlayChainsawEvent);
+	ts->ReportChainsawEvent(ped, Aevent);
+	//subhook_install(subhookPlayChainsawEvent);
+	//chainsaw = &ts->m_tempSound;
+	if (ts->m_nChainsawSoundState != AE_WEAPON_CHAINSAW_STATE_CUTTING)
+	{
+		PlayStop(nullptr, false, true, false, 2);
+		PlayStop(nullptr, false, true, false, 3);
+		LOG("Stopped cutting sound");
 	}
-
-	SoundInstanceSettings opts;
-	opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
-	opts.shooter = ped;
-	opts.looping = true;
-	opts.isChainsawSound = true;
-
-	std::shared_ptr<SoundInstance> existing;
-	for (auto& sfx : AudioManager.audiosplaying) {
-		if (sfx && sfx->isChainsawSound && sfx->source != 0) {
-			existing = sfx;
-			break;
-		}
+// get surface from gentInfo
+	eSurfaceType surf = SURFACE_DEFAULT;
+	auto it = gentInfo.find(ts->m_pPed);
+	if (it != gentInfo.end())
+	{
+		surf = (eSurfaceType)it->second;
 	}
-
-
-	bool managed = false;
-	if (existing) {
-		managed = true;
-	}
-
-	if (!existing && ts->m_nChainsawSoundState == 4) {
-		switch (Aevent)
+	SoundInstanceSettings opts{};
+	std::shared_ptr<SoundInstance> inst;
+	auto SoundStateToStr = [&](int state) -> std::string
 		{
-		case AE_WEAPON_CHAINSAW_IDLE:
-			if (AudioManager.PlaySource(s_idleBuf, opts))
-				managed = true;
+			switch (state)
+			{
+			case AE_WEAPON_CHAINSAW_STATE_IDLE:
+				return "IDLE";
+			case AE_WEAPON_CHAINSAW_STATE_ACTIVE:
+				return "ACTIVE";
+			case AE_WEAPON_CHAINSAW_STATE_CUTTING:
+				return "CUTTING";
+			case AE_WEAPON_CHAINSAW_STATE_STOPPING:
+				return "STOPPING";
+			case AE_WEAPON_CHAINSAW_STATE_STOPPED:
+				return "STOPPED";
+			default:
+				return "UNKNOWN";
+			}
+		};
+	switch (ts->m_nChainsawSoundState) 
+	{
+	case AE_WEAPON_CHAINSAW_STATE_IDLE:
+		if (AudioManager.m_apChainsawSounds[ped][0] == nullptr)
+		{
+			// set up attenuations
+			opts.maxDist = gAttenuationSettings.chainsawIdle.maxDist;
+			opts.refDist = gAttenuationSettings.chainsawIdle.refDist;
+			opts.airAbsorption = gAttenuationSettings.chainsawIdle.airAbsorption;
+			opts.rollOffFactor = gAttenuationSettings.chainsawIdle.rolloffFactor;
+			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+			opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+			if (gPitches.chainsawIdle.has_value())
+			{
+				opts.readPitchFromFile = gPitches.chainsawIdle.has_value();
+				opts.readPitch = *gPitches.chainsawIdle;
+			}
+			opts.pos = ped->GetPosition();
+			opts.looping = true;
+			opts.isChainsawSound = true;
+			opts.shooter = ped;
+			inst = AudioManager.PlaySource(g_Buffers.chainsawBuffers[0], opts);
+			if (inst)
+			{
+				AudioManager.m_apChainsawSounds[ped][0] = inst;
+			}
 			break;
-
-		case AE_WEAPON_CHAINSAW_ACTIVE:
-			if (AudioManager.PlaySource(s_activeBuf, opts))
-				managed = true;
-			break;
-
-		case AE_WEAPON_CHAINSAW_CUTTING:
-			if (AudioManager.PlaySource(s_cuttingBuf, opts))
-				managed = true;
-			break;
-
-		default:
-			break;
+	case AE_WEAPON_CHAINSAW_STATE_ACTIVE:
+		if (AudioManager.m_apChainsawSounds[ped][1] == nullptr)
+		{
+			opts.maxDist = gAttenuationSettings.chainsawActive.maxDist;
+			opts.refDist = gAttenuationSettings.chainsawActive.refDist;
+			opts.airAbsorption = gAttenuationSettings.chainsawActive.airAbsorption;
+			opts.rollOffFactor = gAttenuationSettings.chainsawActive.rolloffFactor;
+			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+			opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+			if (gPitches.chainsawActive.has_value()) 
+			{
+				opts.readPitchFromFile = gPitches.chainsawActive.has_value();
+				opts.readPitch = *gPitches.chainsawActive;
+			}
+			opts.pos = ped->GetPosition();
+			opts.looping = true;
+			opts.isChainsawSound = true;
+			opts.shooter = ped;
+			inst = AudioManager.PlaySource(g_Buffers.chainsawBuffers[1], opts);
+			if (inst)
+			{
+				AudioManager.m_apChainsawSounds[ped][1] = inst;
+			}
+		}
+		break;
+	case AE_WEAPON_CHAINSAW_STATE_CUTTING:
+		if (AudioManager.m_apChainsawSounds[ped][2] == nullptr)
+		{
+			opts.maxDist = gAttenuationSettings.chainsawCutting.maxDist;
+			opts.refDist = gAttenuationSettings.chainsawCutting.refDist;
+			opts.airAbsorption = gAttenuationSettings.chainsawCutting.airAbsorption;
+			opts.rollOffFactor = gAttenuationSettings.chainsawCutting.rolloffFactor;
+			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+			opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+			if (gPitches.chainsawCutting.has_value())
+			{
+				opts.readPitchFromFile = gPitches.chainsawCutting.has_value();
+				opts.readPitch = *gPitches.chainsawCutting;
+			}
+			opts.pos = ped->GetPosition();
+			opts.looping = true;
+			opts.isChainsawSound = true;
+			opts.shooter = ped;
+			ALuint bufferToPlay = 0;
+			if (IsFleshy(surf))
+			{
+				bufferToPlay = g_Buffers.chainsawBuffers[2];
+			}
+			else if (IsAudioMetal(surf)) 
+			{
+				bufferToPlay = g_Buffers.chainsawBuffers[3];
+			}
+			inst = AudioManager.PlaySource(bufferToPlay, opts);
+			if (inst)
+			{
+				AudioManager.m_apChainsawSounds[ped][2] = inst;
+			}
+		}
+		break;
 		}
 	}
-
-	if (!managed) {
-		ts->ReportChainsawEvent(ped, Aevent);
-	}
+	LOG("chainsaw sound state: %s", SoundStateToStr(ts->m_nChainsawSoundState).c_str());
+	LOG("Chainsaw event: %d | state: %d | time: %u",
+		Aevent, ts ? ts->m_nChainsawSoundState : -1, ts ? ts->m_dwTimeChainsaw : 0);
 }
-
-
 
 void __fastcall PlayChainsawStopSound(CAEWeaponAudioEntity* ts, int, CPhysical* entity)
 {
-	Log("YES KING");
-	for (auto& sfx : AudioManager.audiosplaying)
-	{
-		if (sfx && sfx->isChainsawSound && sfx->source != 0)
-		{
-			alSourceStop(sfx->source);
-			alSourcei(sfx->source, AL_BUFFER, 0);
-			alDeleteSources(1, &sfx->source);
-			Log("YES KING: o");
-			sfx->source = 0;
-			sfx->isChainsawSound = false;
-		}
-	}
-
-	if (ts)
-		ts->PlayChainsawStopSound(entity);
+	subhook_remove(subhookPlayChainsawStopSound);
+	ts->PlayChainsawStopSound(entity);
+	subhook_install(subhookPlayChainsawStopSound);
+	PlayStop(nullptr, false, true, false, 2);
+	PlayStop(nullptr, false, true, false, 3);
+	//PlayStop(entity);
+	//LOG("Chainsaw stop sound played.");
 }
 
-void __fastcall RequestNewSoundHooksForStealth(void* ts, int, CAESound* sound)
+// for some reason both sounds played at the same time, so we don't do it for now
+#if 0
+void __fastcall CWeaponAudio__PlayStealthEvent(
+	CAEWeaponAudioEntity* ts, int,
+	eWeaponType weapType,
+	CPed* ped,
+	int event)
 {
+	ts->ReportStealthKill(weapType, ped, event);
+	LOG("Stealth event: %d for weap type: %d", event, weapType);
+	//if (ts->m_tempSound) 
+	//{
+		LOG("SFX %d BANK %d", ts->m_tempSound.m_nSoundIdInSlot, ts->m_tempSound.m_nBankSlotId);
+	//}
 	// paranoid coding moment
 	bool handled = false;
-	if (ts && sound && sound->m_pBaseAudio)
+	if (ts)
 	{
-		CAEWeaponAudioEntity* weapEnt = (CAEWeaponAudioEntity*)sound->m_pBaseAudio;
-		CWeapon* weap = nullptr;
-		unsigned int Aevent = sound->m_nEvent;
-		Log("Stealth Aevent: %u", Aevent);
-		if (weapEnt && weapEnt->m_bActive)
+		CPed* entity = ts->m_pPed;
+		if (entity) 
 		{
-			CPed* entity = weapEnt->m_pPed;
-			if (entity) {
-				weap = entity->GetWeapon();
-				if (weap)
-				{
-					eWeaponType weaponType = weap->m_eWeaponType;
-					switch (Aevent)
-					{
-					case AE_FRONTEND_PICKUP_COLLECTABLE1:
-						if (AUDIOCALL(AUDIOSTEALTHCUT1))
-							handled = true;
-						break;
+			switch (event)
+			{
+			case AE_WEAPON_STEALTH_KILL:
+				if (AudioManager.findWeapon(&weapType, eModelID(-1), "stealth_firstcut", ped, false))
+					handled = true;
+				break;
 
-					case AE_FRONTEND_CAR_NO_CASH:
-						if (AUDIOCALL(AUDIOSTEALTHCUT2))
-							handled = true;
-						break;
-					}
-				}
+			case AE_FRONTEND_CAR_NO_CASH:
+				if (AudioManager.findWeapon(&weapType, eModelID(-1), "stealth_secondcut", ped, false))
+					handled = true;
+				break;
+			}
+		}
+	}
+}
+#endif
+void __fastcall CAESound__Dummy(
+	CAESound* ts, int,
+	__int16 bankSlotId,
+	__int16 sfxId,
+	CAEAudioEntity* audio,
+	float x,
+	float y,
+	float z,
+	float volume,
+	float maxDistance,
+	float speed,
+	float timeScale,
+	char a12,
+	__int16 environmentFlags,
+	float a14,
+	__int16 currPlayPosn)
+{
+	ts->Initialise(
+		bankSlotId,
+		sfxId,
+		audio,
+		CVector(
+			x,
+			y,
+			z),
+		volume,
+		maxDistance,
+		speed,
+		timeScale,
+		a12,
+		environmentFlags,
+		a14,
+		currPlayPosn);
+	CAEWeaponAudioEntity* weaponAudioEntity = reinterpret_cast<CAEWeaponAudioEntity*>(audio);
+	//bool foundSound = false;
+	std::string what;
+	LOG("SFX ID: %d BANK ID: %d", sfxId, bankSlotId);
+	// minigun barrel spin sfx
+	if (weaponAudioEntity && weaponAudioEntity->m_pPed && weaponAudioEntity->m_pPed->GetWeapon()) {
+		eWeaponType weaponType = weaponAudioEntity->m_pPed->GetWeapon()->m_eWeaponType;
+		switch (sfxId) {
+	
+		case 28:
+			if (bankSlotId == 5)
+			what = "spraycan_sprayloop";
+
+			break;
+		case 9:
+			if (bankSlotId == 5)
+			what = "extinguisher_loop";
+			else if (bankSlotId == 3)
+			what = "chainsaw_cuttingflesh";
+			break;
+		case 7:
+		case 8:
+			if (bankSlotId == 3)
+			{
+				what = "chainsaw_cuttingflesh";
+			}
+			break;
+		case 10:
+		case 83:
+		case 26:
+			if (bankSlotId == 5 || bankSlotId == 19) {
+				// flamethrower
+				if (sfxId == 26)
+					what = "flamethrower_fire";
+				else if (sfxId == 83)
+					what = "flamethrower_start";
+				else if (sfxId == 10)
+					what = "flamethrower_idlegasloop";
+			}
+			break;
+			
+		// minigun barrel spin & spin end
+		case 14:
+			if (bankSlotId == 5)
+			what = "minigun_barrelspinloop";
+			break;
+		case 63:
+			if (bankSlotId == 5)
+			what = "minigun_barrelspinend";
+			break;
+		case 15:
+		case 16:
+		case 11:
+		case 12:
+		case 13:
+			if (bankSlotId == 5)
+			what = "minigun_fireloop";
+			break;
+			// chainsaw sounds
+		case 1: // idle
+			if (bankSlotId == 40) {
+				what = "chainsaw_idle";
+				//bankSlotId = 1337;
+			}
+			break;
+
+		case 0: // active
+			if (bankSlotId == 40)
+			{
+				what = "chainsaw_active";
+				//bankSlotId = 1337;
+			}
+			break;
+
+		case 2: // stop
+			if (bankSlotId == 40) {
+				what = "chainsaw_stop";
+				//bankSlotId = 1337;
+			}
+			break;
+#if 0
+		case 33:
+		case 53:
+			if (bankSlotId == 5) {
+				eWeaponType knife = WEAPONTYPE_KNIFE;
+				AudioManager.findWeapon(&knife, eModelID(-1), "stealth_firstcut", weaponAudioEntity->m_pPed, true);
+			}
+			break;
+
+		case 81:
+			LOG("SFX 81 (stealth first cut) bank slot id: %d", bankSlotId);
+			if (bankSlotId == 5)
+				what = "stealth_firstcut";
+			break;
+
+		case 47:
+			LOG("SFX 47 (stealth first cut) bank slot id: %d", bankSlotId);
+			if (bankSlotId == 2)
+				what = "stealth_secondcut";
+			break;
+#endif
+		default: break;
+		}
+		LOG("weapontype %d", weaponType);
+		if (!what.empty()) {
+			if (what == "minigun_barrelspinloop")
+			{
+				AudioManager.PlayOrStopBarrelSpinSound(weaponAudioEntity->m_pPed, &weaponType, true);
+			}
+			else if (what == "minigun_barrelspinend")
+			{
+				AudioManager.PlayOrStopBarrelSpinSound(weaponAudioEntity->m_pPed, &weaponType, false, true);
+			}
+			else if (what == "chainsaw_stop")
+			{
+				PlayStop(weaponAudioEntity->m_pPed, true, true, false, 1);
+				PlayStop(nullptr, false, true, false, 2);
+				PlayStop(nullptr, false, true, false, 3);
+			}
+			/*else if (what == "stealth_firstcut")
+			{
+				AudioManager.findWeapon(&weaponType, eModelID(-1), what, weaponAudioEntity->m_pPed);
+			}
+			else if (what == "stealth_secondcut")
+			{
+				AudioManager.findWeapon(&weaponType, eModelID(-1), what, weaponAudioEntity->m_pPed);
+			}*/
+		}
+	}
+}
+#include "CAEAudioHardware.h"
+// 0x4D88C0
+bool CAEAudioHardware__IsSoundBankLoaded(uint16_t bankId, int16_t bankSlotId) {
+	return CallMethodAndReturn<bool, 0x4D88C0, void*, uint16_t, int16_t>((void*)0xB5F8B8, bankId, bankSlotId);
+}
+void __fastcall CAESound__CalculateVolume(CAESound* snd, int)
+{
+	bool skipVolumeCalc = false;
+	std::string what;
+	eWeaponType typeWeNeed = WEAPONTYPE_UNARMED;
+	switch (snd->m_nSoundIdInSlot) {
+	case 28:
+		if (snd->m_nBankSlotId == 5) {
+			what = "spraycan_sprayloop"; typeWeNeed = WEAPONTYPE_SPRAYCAN;
+		}
+		break;
+	case 9:
+		if (snd->m_nBankSlotId == 5) 
+		{ 
+			what = "extinguisher_loop"; typeWeNeed = WEAPONTYPE_EXTINGUISHER;
+		}
+		else if (snd->m_nBankSlotId == 3) 
+		{
+			what = "chainsaw_cuttingflesh"; typeWeNeed = WEAPONTYPE_CHAINSAW;
+		}
+		break;
+	case 7:
+	case 8:
+		if (snd->m_nBankSlotId == 3)
+		{
+			what = "chainsaw_cuttingflesh"; typeWeNeed = WEAPONTYPE_CHAINSAW;
+		}
+		break;
+	case 10:
+	case 83:
+	case 26:
+		if (snd->m_nBankSlotId == 5 || snd->m_nBankSlotId == 19) 
+		{
+			if (snd->m_nSoundIdInSlot == 26)
+			what = "flamethrower_fire";
+			else if (snd->m_nSoundIdInSlot == 83)
+				what = "flamethrower_start";
+			else if (snd->m_nSoundIdInSlot == 10)
+				what = "flamethrower_idlegasloop";
+
+			typeWeNeed = WEAPONTYPE_FTHROWER;
+		}
+		break;
+	case 14:
+		if (snd->m_nBankSlotId == 5) 
+		{
+			what = "minigun_barrelspinloop"; typeWeNeed = WEAPONTYPE_MINIGUN;
+		}
+		break;
+	case 63:
+		if (snd->m_nBankSlotId == 5) 
+		{
+			what = "minigun_barrelspinend"; typeWeNeed = WEAPONTYPE_MINIGUN;
+		}
+		break;
+	case 15: case 16: case 11: case 12: case 13:
+		if (snd->m_nBankSlotId == 5) {
+			what = "minigun_fireloop"; typeWeNeed = WEAPONTYPE_MINIGUN;
+		}
+		break;
+	case 1: // chainsaw idle
+		if (snd->m_nBankSlotId == 40 && CAEAudioHardware__IsSoundBankLoaded(36, 40)) {
+			what = "chainsaw_idle"; typeWeNeed = WEAPONTYPE_CHAINSAW; 
+		}
+		break;
+	case 0: // chainsaw active
+		if (snd->m_nBankSlotId == 40 && CAEAudioHardware__IsSoundBankLoaded(36, 40)) {
+			what = "chainsaw_active"; typeWeNeed = WEAPONTYPE_CHAINSAW; 
+		}
+		break;
+	case 2: // chainsaw stop
+		if (snd->m_nBankSlotId == 40 && CAEAudioHardware__IsSoundBankLoaded(36, 40))
+		{ 
+			what = "chainsaw_stop"; typeWeNeed = WEAPONTYPE_CHAINSAW;
+		}
+		break;
+#if 0
+	case 81:
+		if (snd->m_nBankSlotId == 5) 
+		{
+			what = "stealth_firstcut"; typeWeNeed = WEAPONTYPE_KNIFE;
+		}
+		break;
+
+	case 47:
+		if (snd->m_nBankSlotId == 2)
+		{
+			what = "stealth_secondcut"; typeWeNeed = WEAPONTYPE_KNIFE;
+		}
+		break;
+#endif
+	default:
+		break;
+	}
+	if (!what.empty() && AudioManager.findWeapon(&typeWeNeed, eModelID(-1), what, (CPhysical*)snd->m_pPhysicalEntity, false)) {
+		//if (snd->m_pPhysicalEntity) {
+			// found a replacement for vanilla sfx, mute it
+			//if (found) {
+				skipVolumeCalc = true;
+				//LOG("SFX ID: %d, BANK ID %d", snd->m_nSoundIdInSlot, snd->m_nBankSlotId);
+			//}
+		//}
+	}
+
+	if (!skipVolumeCalc) {
+		snd->CalculateVolume();
+	}
+}
+
+
+void __fastcall CAEWeaponAudioEntity__PlayFlameThrowerSounds(
+	CAEWeaponAudioEntity* ts, int,
+	CPhysical* entity,
+	__int16 sfx1,
+	__int16 sfx2,
+	int audioEventId,
+	float audability,
+	float speed)
+{
+	subhook_remove(subhookCAEWeaponAudioEntity__PlayFlameThrowerSounds);
+	ts->PlayFlameThrowerSounds(entity, sfx1, sfx2, audioEventId, audability, speed);
+	subhook_install(subhookCAEWeaponAudioEntity__PlayFlameThrowerSounds);
+	LOG("Flamethrower SFX1: %d, SFX2: %d", sfx1, sfx2);
+
+	CPed* ped = ts->m_pPed;
+	eWeaponType weaponType = ped ? ped->GetWeapon()->m_eWeaponType : WEAPONTYPE_UNARMED;
+	if (sfx1 == 83) {
+		if (AudioManager.m_apFlamethrowerSounds[ped][2] == nullptr) {
+			SoundInstanceSettings opts{};
+			opts.maxDist = gAttenuationSettings.flamethrowerStart.maxDist;
+			opts.refDist = gAttenuationSettings.flamethrowerStart.refDist;
+			opts.airAbsorption = gAttenuationSettings.flamethrowerStart.airAbsorption;
+			opts.rollOffFactor = gAttenuationSettings.flamethrowerStart.rolloffFactor;
+			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+			opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+			if (gPitches.flamethrowerStart.has_value())
+			{
+				opts.readPitchFromFile = gPitches.flamethrowerStart.has_value();
+				opts.readPitch = *gPitches.flamethrowerStart;
+			}
+			opts.pos = ped->GetPosition();
+			opts.shooter = ped;
+			auto inst = AudioManager.PlaySource(g_Buffers.flamethrowerBuffers[1], opts);
+			if (inst) {
+				AudioManager.m_apFlamethrowerSounds[ped][2] = inst;
+				LOG("Firing flamethrower: start (custom)");
 			}
 		}
 	}
 
-	if (!handled) 
-	{
-		CallMethod<0x4EFB10, void*, CAESound*>(ts, sound);
+	if (sfx2 == 26) {
+		if (AudioManager.m_apFlamethrowerSounds[ped][0] == nullptr) {
+			SoundInstanceSettings opts{};
+			opts.maxDist = gAttenuationSettings.flamethrowerFireLoop.maxDist; // 100.0f
+			opts.refDist = gAttenuationSettings.flamethrowerFireLoop.refDist; // 1.0f
+			opts.airAbsorption = gAttenuationSettings.flamethrowerFireLoop.airAbsorption; // 1.0f
+			opts.rollOffFactor = gAttenuationSettings.flamethrowerFireLoop.rolloffFactor; // 1.0f
+			opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+			opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+			if (gPitches.flamethrowerFireLoop.has_value())
+			{
+				opts.readPitchFromFile = gPitches.flamethrowerFireLoop.has_value();
+				opts.readPitch = *gPitches.flamethrowerFireLoop;
+			}
+			opts.pos = ped->GetPosition();
+			opts.looping = true;
+			opts.shooter = ped;
+			auto inst = AudioManager.PlaySource(g_Buffers.flamethrowerBuffers[2], opts);
+			if (inst) {
+				AudioManager.m_apFlamethrowerSounds[ped][0] = inst;
+				LOG("Firing flamethrower: main loop (custom)");
+			}
+		}
 	}
+}
+
+
+// 0x503870
+void __fastcall CAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop(CAEWeaponAudioEntity* ts, int, CPhysical* entity) {
+	subhook_remove(subhookCAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop);
+	ts->PlayFlameThrowerIdleGasLoop(entity);
+	subhook_install(subhookCAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop);
+
+	// play the gas loop sound
+	if (ts->m_pPed && AudioManager.m_apFlamethrowerSounds[ts->m_pPed][1] == nullptr) {
+		SoundInstanceSettings opts{};
+		opts.maxDist = gAttenuationSettings.flamethrowerGasLoop.maxDist; // 100.0f
+		opts.refDist = gAttenuationSettings.flamethrowerGasLoop.refDist; // 1.0f
+		opts.airAbsorption = gAttenuationSettings.flamethrowerGasLoop.airAbsorption; // 1.0f
+		opts.rollOffFactor = gAttenuationSettings.flamethrowerGasLoop.rolloffFactor; // 1.0f
+		opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+		opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+		if (gPitches.flamethrowerGasLoop.has_value())
+		{
+			opts.readPitchFromFile = gPitches.flamethrowerGasLoop.has_value();
+			opts.readPitch = *gPitches.flamethrowerGasLoop;
+		}
+		opts.pos = ts->m_pPed->GetPosition();
+		opts.looping = true;
+		opts.shooter = ts->m_pPed;
+		auto inst = AudioManager.PlaySource(g_Buffers.flamethrowerBuffers[0], opts);
+		if (inst)
+		{
+			AudioManager.m_apFlamethrowerSounds[ts->m_pPed][1] = inst;
+		}
+	}
+}
+
+// 0x5034E0
+void __fastcall CAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop(CAEWeaponAudioEntity* ts, int) {
+	subhook_remove(subhookCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop);
+	ts->StopFlameThrowerIdleGasLoop();
+	subhook_install(subhookCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop);
+	CPed* owner = ts->m_pPed;
+	if (owner) {
+		auto it = AudioManager.m_apFlamethrowerSounds.find(owner);
+		if (it != AudioManager.m_apFlamethrowerSounds.end()) {
+			auto& inst = it->second[1];
+			if (inst) {
+				alSourceStop(inst->source);
+				alDeleteSources(1, &inst->source);
+				inst->source = 0;
+				it->second[1] = nullptr;
+			}
+		}
+	}
+}
+
+void __fastcall StopFlamethrowerFireSound(CAESound* snd, int) 
+{
+	LOG("Stopping flamethrower fire sfx");
+	snd->StopSoundAndForget();
+	//bool handled = false;
+	for (auto& entry : AudioManager.m_apFlamethrowerSounds) {
+		CPed* shooter = entry.first;
+		if (!shooter) continue;
+		auto& inst0 = entry.second[0]; // flamethrower fire loop sound is at index 0
+		auto& inst2 = entry.second[2]; // flamethrower start sound is at index 2
+		if (inst0) {
+			// stop and delete the sound
+			alSourceStop(inst0->source);
+			alDeleteSources(1, &inst0->source);
+			inst0->source = 0;
+			AudioManager.m_apFlamethrowerSounds[shooter][0] = nullptr;
+		}
+		if (inst2) {
+			// stop and delete the sound
+			alSourceStop(inst2->source);
+			alDeleteSources(1, &inst2->source);
+			inst2->source = 0;
+			AudioManager.m_apFlamethrowerSounds[shooter][2] = nullptr;
+		}
+	}
+	LOG("Stopping flamethrower fire sfx");
+}
+
+void __fastcall StopSpraycanSound(CAESound* snd, int)
+{
+	snd->StopSoundAndForget();
+	bool handled = false;
+	for (auto& entry : AudioManager.m_apSpraycanSounds) {
+		CPed* shooter = entry.first;
+		if (!shooter) continue;
+		auto& inst = entry.second; // flamethrower fire sound is at index 0
+		if (inst) {
+			// stop and delete the sound
+			alSourceStop(inst->source);
+			alDeleteSources(1, &inst->source);
+			inst->source = 0;
+			AudioManager.m_apSpraycanSounds[shooter] = nullptr;
+		}
+	}
+	LOG("Stopped spraycan sfx");
+}
+
+void __fastcall StopFireExtinguisherSound(CAESound* snd, int)
+{
+	snd->StopSoundAndForget();
+	for (auto& entry : AudioManager.m_apFireextinguisherSounds) {
+		CPed* shooter = entry.first;
+		if (!shooter) continue;
+		auto& inst = entry.second; // flamethrower fire sound is at index 0
+		if (inst) {
+			// stop and delete the sound
+			alSourceStop(inst->source);
+			alDeleteSources(1, &inst->source);
+			inst->source = 0;
+			AudioManager.m_apFireextinguisherSounds[shooter] = nullptr;
+		}
+	}
+	LOG("Stopped fire extinguisher sfx");
+}
+
+void __fastcall StopMinigunSounds(CAESound* snd, int) 
+{
+	LOG("Stopping minigun sfx %d", snd->m_nSoundIdInSlot);
+	snd->StopSoundAndForget();
+	for (auto& entry : AudioManager.m_apMinigunSound) {
+		CPed* shooter = entry.first;
+		if (!shooter) continue;
+		if (snd->m_nBankSlotId != 5) continue;
+		auto& inst = entry.second[0];
+		auto& inst1 = entry.second[1];
+		switch (snd->m_nSoundIdInSlot) {
+		case 15:
+		case 16:
+		case 11:
+		case 12:
+		case 13:
+			if (inst) {
+				// stop and delete the sound
+				alSourceStop(inst->source);
+				alDeleteSources(1, &inst->source);
+				inst->source = 0;
+				AudioManager.m_apMinigunSound[shooter][0] = nullptr;
+				LOG("Stopped minigun fire loop sfx");
+			}
+			break;
+		case 14:
+		case 63:
+			if (inst1) {
+				// stop and delete the sound
+				alSourceStop(AudioManager.barrelSpinSource);
+				alDeleteSources(1, &AudioManager.barrelSpinSource);
+				AudioManager.barrelSpinSource = 0;
+				AudioManager.m_apMinigunSound[shooter][1] = nullptr;
+				LOG("Stopped minigun spin loop sfx");
+			}
+			break;
+		}
+	}
+	LOG("Stopped minigun sfx with event %u", snd->m_nEvent);
+}
+
+void __fastcall StopChainsawSounds(CAESound* snd, int) 
+{
+	snd->StopSoundAndForget();
+	switch (snd->m_nSoundIdInSlot) 
+	{
+	case 1: //idle
+		PlayStop(nullptr, false, true, false, 0);
+		break;
+	case 0: //active
+		PlayStop(nullptr, false, true, false, 1);
+		PlayStop(nullptr, false, true, false, 2);
+		PlayStop(nullptr, false, true, false, 3);
+		//PlayStop(nullptr, false, true, false, 2);
+		break;
+	//case 2: //cutting
+	//	PlayStop(nullptr, false, true, false, 2);
+	//	break;
+	}
+	LOG("cleared all chainsaw sfx, sfx %d", snd->m_nSoundIdInSlot);
+}
+
+//#endif
+
+void __fastcall CAEWeaponAudioEntity__PlayWeaponLoopSound(
+	CAEWeaponAudioEntity* ts, int,
+	CPhysical* entity,
+	__int16 sfxId,
+	int audioEventId,
+	float audability,
+	float speed,
+	unsigned __int32 finalEvent)
+{
+	ts->PlayWeaponLoopSound(entity, sfxId, audioEventId, audability, speed, finalEvent);
+	auto weaponType = ts->m_pPed ? ts->m_pPed->GetWeapon()->m_eWeaponType : WEAPONTYPE_UNARMED;
+	bool foundSound = false;
+	if (AudioManager.findWeapon(&weaponType, eModelID(-1), sfxId == 28 ? "spraycan_sprayloop" : sfxId == 9 ? "extinguisher_loop" : "", ts->m_pPed, false)) 
+	{
+		foundSound = true;
+	}
+	if (foundSound) {
+		switch (sfxId) {
+		case 28: // spraycan sfxId
+			if (AudioManager.m_apSpraycanSounds[ts->m_pPed] == nullptr) {
+				SoundInstanceSettings opts{};
+				opts.maxDist = gAttenuationSettings.sprayCan.maxDist; // 100.0f
+				opts.refDist = gAttenuationSettings.sprayCan.refDist; // 1.0f
+				opts.airAbsorption = gAttenuationSettings.sprayCan.airAbsorption; // 1.0f
+				opts.rollOffFactor = gAttenuationSettings.sprayCan.rolloffFactor; // 1.0f
+				opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+				opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+				if (gPitches.sprayCan.has_value())
+				{
+					opts.readPitchFromFile = gPitches.sprayCan.has_value();
+					opts.readPitch = *gPitches.sprayCan;
+				}
+				opts.pos = ts->m_pPed->GetPosition();
+				opts.looping = true;
+				opts.shooter = ts->m_pPed;
+				auto inst = AudioManager.PlaySource(g_Buffers.sprayCanLoopBuffer, opts);
+				if (inst)
+				{
+					AudioManager.m_apSpraycanSounds[ts->m_pPed] = inst;
+				}
+			}
+			break;
+
+		case 9: // fireextinguisher sfxId
+			if (AudioManager.m_apFireextinguisherSounds[ts->m_pPed] == nullptr) {
+				SoundInstanceSettings opts{};
+				opts.airAbsorption = gAttenuationSettings.fireExtinguisher.airAbsorption; // 1.0f
+				opts.rollOffFactor = gAttenuationSettings.fireExtinguisher.rolloffFactor; // 1.0f
+				opts.maxDist = gAttenuationSettings.fireExtinguisher.maxDist; // 100.0f
+				opts.refDist = gAttenuationSettings.fireExtinguisher.refDist; // 1.0f
+				opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+				opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+				if (gPitches.fireExtinguisher.has_value())
+				{
+					opts.readPitchFromFile = gPitches.fireExtinguisher.has_value();
+					opts.readPitch = *gPitches.fireExtinguisher;
+				}
+				opts.pos = ts->m_pPed->GetPosition();
+				opts.looping = true;
+				opts.shooter = ts->m_pPed;
+				auto inst = AudioManager.PlaySource(g_Buffers.fireExtinguisherLoopBuffer, opts);
+				if (inst)
+				{
+					AudioManager.m_apFireextinguisherSounds[ts->m_pPed] = inst;
+				}
+			}
+
+			break;
+		}
+	}
+}
+
+void __fastcall CAEWeaponAudioEntity__PlayGunSounds(
+	CAEWeaponAudioEntity* ts, int,
+	CPhysical* a2,
+	__int16 emptySfxId,
+	__int16 farSfxId2,
+	__int16 highPitchSfxId3,
+	__int16 lowPitchSfxId4,
+	__int16 echoSfxId5,
+	int nAudioEventId,
+	float volumeChange,
+	float speed1,
+	float speed2)
+{
+	LOG("PlayGunSounds SFX: empty sfx %d, farSfx %d,  highPitchSfx %d, lowPitchSfx %d, echoSfx %d", emptySfxId, farSfxId2, highPitchSfxId3, lowPitchSfxId4, echoSfxId5);
+	ts->PlayGunSounds(
+		a2,
+		emptySfxId,
+		farSfxId2,
+		highPitchSfxId3,
+		lowPitchSfxId4,
+		echoSfxId5,
+		nAudioEventId,
+		volumeChange,
+		speed1,
+		speed2);
+	if (AudioManager.m_apMinigunSound[ts->m_pPed][0] == nullptr) {
+		SoundInstanceSettings opts{};
+		opts.airAbsorption = gAttenuationSettings.minigunShoot.airAbsorption; // 1.0f
+		opts.rollOffFactor = gAttenuationSettings.minigunShoot.rolloffFactor; // 1.0f
+		opts.maxDist = gAttenuationSettings.minigunShoot.maxDist; // 100.0f
+		opts.refDist = gAttenuationSettings.minigunShoot.refDist; // 1.0f
+		opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+		opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+		if (gPitches.minigunShoot.has_value())
+		{
+			opts.readPitchFromFile = gPitches.minigunShoot.has_value();
+			opts.readPitch = *gPitches.minigunShoot;
+		}
+		opts.pos = ts->m_pPed->GetPosition();
+		opts.shooter = ts->m_pPed;
+		opts.looping = true;
+		auto inst = AudioManager.PlaySource(g_Buffers.minigunBuffers[0], opts);
+		if (inst)
+		{
+			AudioManager.m_apMinigunSound[ts->m_pPed][0] = inst;
+		}
+	}
+}
+
+// mostly copy and paste from the footsteps func
+void __fastcall CAEPedAudioEntity__HandleLandingEvent(CAEPedAudioEntity* audio, int, int event)
+{
+	LOG("Event sound played: %d", event);
+	float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	gameVol *= fader;
+	float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+	float FinalPitch = pitch;
+	bool PitchReadFromFile = false;
+	if (audio && audio->m_pPed) {
+		CPed* pedPtr = audio->m_pPed;
+		eSurfaceType actualSurface = eSurfaceType(pedPtr->m_nContactSurface);
+
+		if (actualSurface <= TOTAL_NUM_SURFACE_TYPES) {
+			std::string surfaceType = "default";
+
+			switch (actualSurface) {
+			case SURFACE_PED:
+			case SURFACE_GORE: surfaceType = "flesh"; break;
+			case SURFACE_GLASS:
+			case SURFACE_GLASS_WINDOWS_LARGE: surfaceType = "glass"; break;
+			default:
+				if (IsAudioGrass(actualSurface)) surfaceType = "grass";
+				else if (IsAudioWood(actualSurface)) surfaceType = "wood";
+				else if (IsAudioMetal(actualSurface)) surfaceType = "metal";
+				else if (IsAudioSand(actualSurface)) surfaceType = "sand";
+				else if (IsAudioGravel(actualSurface)) surfaceType = "dirt";
+				else if (IsAudioConcrete(actualSurface)) surfaceType = "pavement";
+				else if (IsAudioWater(actualSurface) || IsWater(actualSurface) || IsShallowWater(actualSurface)) surfaceType = "water";
+				else if (IsAudioTile(actualSurface)) surfaceType = "tile";
+				break;
+			}
+
+			std::string shoeType = "default";
+			std::string shoeTextureType = "default";
+			CPedClothesDesc* clothesDesc = pedPtr->m_pPlayerData ? pedPtr->m_pPlayerData->m_pPedClothesDesc : nullptr;
+
+			if (clothesDesc) {
+				unsigned int modelId = clothesDesc->m_anModelKeys[CLOTHES_MODEL_SHOES];
+				unsigned int textureId = clothesDesc->m_anTextureKeys[CLOTHES_TEXTURE_SHOES];
+				for (const auto& [folder, surfaceMap] : g_Buffers.landingBuffers) {
+					if (CKeyGen::GetUppercaseKey(folder.c_str()) == modelId) {
+						shoeType = folder;
+						break;
+					}
+				}
+				for (const auto& [folder, surfaceMap] : g_Buffers.landingByShoeTextureBuffers) {
+					if (CKeyGen::GetUppercaseKey(folder.c_str()) == textureId) {
+						shoeTextureType = folder;
+						break;
+					}
+				}
+			}
+
+			// Landing or collapse?
+			bool isCollapse = (event == AE_PED_COLLAPSE_AFTER_FALL);
+
+			std::vector<ALuint>* selected = nullptr;
+
+			// Try to find a special shoe sound
+			if (!isCollapse) {
+				auto shoeIt = g_Buffers.landingBuffers.find(shoeType);
+				if (shoeIt != g_Buffers.landingBuffers.end()) {
+					auto surfIt = shoeIt->second.find(surfaceType);
+					if (surfIt != shoeIt->second.end() && !surfIt->second.empty()) {
+						selected = &surfIt->second;
+					}
+				}
+				// texture ones
+				auto textureIt = g_Buffers.landingByShoeTextureBuffers.find(shoeTextureType);
+				if (textureIt != g_Buffers.landingByShoeTextureBuffers.end()) {
+					auto surfIt = textureIt->second.find(surfaceType);
+					if (surfIt != textureIt->second.end() && !surfIt->second.empty()) {
+						selected = &surfIt->second;
+					}
+				}
+			}
+			else {
+				auto shoeIt = g_Buffers.collapseBuffers.find(shoeType);
+				if (shoeIt != g_Buffers.collapseBuffers.end()) {
+					auto surfIt = shoeIt->second.find(surfaceType);
+					if (surfIt != shoeIt->second.end() && !surfIt->second.empty()) {
+						selected = &surfIt->second;
+					}
+				}
+				// texture ones
+				auto textureIt = g_Buffers.collapseByShoeTextureBuffers.find(shoeTextureType);
+				if (textureIt != g_Buffers.collapseByShoeTextureBuffers.end()) {
+					auto surfIt = textureIt->second.find(surfaceType);
+					if (surfIt != textureIt->second.end() && !surfIt->second.empty()) {
+						selected = &surfIt->second;
+					}
+				}
+			}
+
+			// If none, we search for generic sounds
+			if (!selected) {
+				if (!isCollapse) {
+					auto surfIt = g_Buffers.landingPerSurfaceBuffers.find(surfaceType);
+					if (surfIt != g_Buffers.landingPerSurfaceBuffers.end() && !surfIt->second.empty()) {
+						selected = &surfIt->second;
+					}
+				}
+				else {
+					auto surfIt = g_Buffers.collapsePerSurfaceBuffers.find(surfaceType);
+					if (surfIt != g_Buffers.collapsePerSurfaceBuffers.end() && !surfIt->second.empty()) {
+						selected = &surfIt->second;
+					}
+				}
+			}
+
+			// Fallback to default
+			if (!selected) {
+				if (!isCollapse) {
+					auto surfIt = g_Buffers.landingPerSurfaceBuffers.find("default");
+					if (surfIt != g_Buffers.landingPerSurfaceBuffers.end() && !surfIt->second.empty()) {
+						selected = &surfIt->second;
+					}
+				}
+				else {
+					auto surfIt = g_Buffers.collapsePerSurfaceBuffers.find("default");
+					if (surfIt != g_Buffers.collapsePerSurfaceBuffers.end() && !surfIt->second.empty()) {
+						selected = &surfIt->second;
+					}
+				}
+			}
+			// Play them
+			if (selected && !selected->empty()) {
+
+				//int index = CGeneral::GetRandomNumber() % selected->size();
+				RandomIntegers rnd(selected->size());
+
+				int index = rnd.next();
+				ALuint buffer = (*selected)[index];
+				//CVector position = pedPtr->GetPosition();
+				float referenceDistance, maxDist, airAbs, rollOff;
+
+				if (pedPtr->IsPlayer()) {
+					if (!isCollapse) {
+						referenceDistance = gAttenuationSettings.landingPlayer.refDist; // 0.5f
+						maxDist = gAttenuationSettings.landingPlayer.maxDist;
+						airAbs = gAttenuationSettings.landingPlayer.airAbsorption;
+						rollOff = gAttenuationSettings.landingPlayer.rolloffFactor;
+						if (gPitches.landingPlayer.has_value())
+						{
+							PitchReadFromFile = gPitches.landingPlayer.has_value();
+							FinalPitch = *gPitches.landingPlayer;
+						}
+					}
+					else {
+						referenceDistance = gAttenuationSettings.collapsePlayer.refDist;
+						maxDist = gAttenuationSettings.collapsePlayer.maxDist;
+						airAbs = gAttenuationSettings.collapsePlayer.airAbsorption;
+						rollOff = gAttenuationSettings.collapsePlayer.rolloffFactor;
+						if (gPitches.collapsePlayer.has_value())
+						{
+							PitchReadFromFile = gPitches.collapsePlayer.has_value();
+							FinalPitch = *gPitches.collapsePlayer;
+						}
+					}
+					LOG("Player move state: %d", pedPtr->m_nMoveState);
+				}
+				else {
+					if (!isCollapse) {
+						referenceDistance = gAttenuationSettings.landingNPC.refDist; // 0.3f
+						maxDist = gAttenuationSettings.landingNPC.maxDist;
+						airAbs = gAttenuationSettings.landingNPC.airAbsorption;
+						rollOff = gAttenuationSettings.landingNPC.rolloffFactor;
+						if (gPitches.landingNPC.has_value()) 
+						{
+							PitchReadFromFile = gPitches.landingNPC.has_value();
+							FinalPitch = *gPitches.landingNPC;
+						}
+					}
+					else {
+						referenceDistance = gAttenuationSettings.collapseNPC.refDist;
+						maxDist = gAttenuationSettings.collapseNPC.maxDist;
+						airAbs = gAttenuationSettings.collapseNPC.airAbsorption;
+						rollOff = gAttenuationSettings.collapseNPC.rolloffFactor;
+						if (gPitches.collapseNPC.has_value())
+						{
+							PitchReadFromFile = gPitches.collapseNPC.has_value();
+							FinalPitch = *gPitches.collapseNPC;
+						}
+					}
+					LOG("NPC move state: %d", pedPtr->m_nMoveState);
+				}
+				SoundInstanceSettings opts;
+				opts.pos = pedPtr->GetPosition();
+				opts.maxDist = maxDist;//pedPtr->IsPlayer() ? 140.0f : 150.0f; (FLT_MAX prev)
+				opts.gain = gameVol;
+				opts.airAbsorption = airAbs; // pedPtr->IsPlayer() ? 1.5f : 3.0f;
+				opts.refDist = referenceDistance;
+				opts.rollOffFactor = rollOff; // pedPtr->IsPlayer() ? 1.5f : 2.5f;
+				opts.pitch = pitch;
+				opts.readPitchFromFile = PitchReadFromFile;
+				opts.readPitch = FinalPitch;
+				opts.entity = pedPtr;
+				AudioManager.PlaySource(buffer, opts);
+				return;
+			}
+		}
+	}
+	CallMethod<0x4E18E0, CAEPedAudioEntity*, int>(audio, event);
+}
+void __fastcall CAEWeaponAudioEntity__PlayGoggleSound(CAEWeaponAudioEntity* ts, int, __int16 sfxId, int audioEventId)
+{
+	float volume = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	volume *= fader;
+	eWeaponType weaponType = ts->m_pPed ? ts->m_pPed->GetWeapon()->m_eWeaponType : WEAPONTYPE_UNARMED;
+	bool foundSound = AudioManager.findWeapon(&weaponType, eModelID(-1), "goggles_on", ts->m_pPed, false);
+	if (foundSound) 
+	{
+		AudioManager.PlaySource2D(g_Buffers.gogglesBuffer[0], true, volume, 0.0f);
+		return;
+	}
+	ts->PlayGoggleSound(sfxId, audioEventId);
+}
+
+void __fastcall CPed__RemoveGogglesModel(CPed* ts, int) 
+{
+	float volume = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	volume *= fader;
+	eWeaponType weaponType = ts ? ts->GetWeapon()->m_eWeaponType : WEAPONTYPE_UNARMED;
+	bool foundSound = AudioManager.findWeapon(&weaponType, eModelID(-1), "goggles_off", ts, false);
+	if (foundSound)
+	{
+		AudioManager.PlaySource2D(g_Buffers.gogglesBuffer[1], true, volume, 0.0f);
+	}
+	ts->RemoveGogglesModel();
+}
+
+void __fastcall CAEWeaponAudioEntity__PlayCameraSound(
+	CAEWeaponAudioEntity* ts, int,
+	CPhysical* entity,
+	int audioEventId,
+	float audability)
+{
+	float volume = AEAudioHardware.m_fEffectMasterScalingFactor;
+	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+	volume *= fader;
+	eWeaponType weaponType = ts->m_pPed ? ts->m_pPed->GetWeapon()->m_eWeaponType : WEAPONTYPE_UNARMED;
+	bool foundSound = AudioManager.findWeapon(&weaponType, eModelID(-1), "camera_shutter", ts->m_pPed, false);
+	if (foundSound)
+	{
+		AudioManager.PlaySource2D(g_Buffers.cameraShutterBuffer, true, volume, 0.0f);
+		return;
+	}
+	ts->PlayCameraSound(entity, audioEventId, audability);
+}
+
+void __fastcall CAESoundManager__CancelSoundsOwnedByAudioEntity(void* ts, int, CAEAudioEntity* entity, uint8_t a3)
+{
+	if (entity)
+	{
+		CAEFireAudioEntity* fireEntity = reinterpret_cast<CAEFireAudioEntity*>(entity);
+		// stop all active non-fire sounds from this entity
+		if (fireEntity) {
+			auto SafeDeleteInstanceSource = [&](std::shared_ptr<SoundInstance> inst) {
+				if (!inst) return;
+				if (inst->source != 0) {
+					alDeleteSources(1, &inst->source);
+					inst->source = 0;
+				}
+
+				inst->entity = nullptr;
+				inst->shooter = nullptr;
+				inst->firePtr = nullptr;
+				inst->paused = false;
+				inst->isFire = false;
+				inst.reset();
+				};
+
+			for (auto it = g_Buffers.ent.begin(); it != g_Buffers.ent.end();) {
+				CAEFireAudioEntity* entity = *it;
+				if (entity != fireEntity)
+				{
+					++it;
+					continue;
+				}
+				if (entity->field_84) {
+					for (auto nsIt = g_Buffers.nonFireSounds.begin(); nsIt != g_Buffers.nonFireSounds.end();) {
+						auto& instShared = nsIt->second;
+						bool erased = false;
+						// we gotta really make sure it's a non-harming fire particle...
+						if (instShared && !instShared->isFire && instShared->fireFX && fireEntity->field_84 && instShared->fireFX == fireEntity->field_84) {
+
+							LOG("Stopping non-fire sound instance tied to entity %p", (void*)entity);
+							// Stop playback
+							if (instShared->source != 0) {
+								alSourceStop(instShared->source);
+								ALint state = AudioManager.GetSourceState(instShared->source);
+								// Delete source only when it is stopped and not paused (in case it will get resumed later)
+								if (state == AL_STOPPED && !instShared->paused) {
+									SafeDeleteInstanceSource(instShared);
+								}
+							}
+
+							nsIt = g_Buffers.nonFireSounds.erase(nsIt);
+							erased = true;
+						}
+
+						if (!erased) {
+							++nsIt;
+						}
+					}
+				}
+
+				it = g_Buffers.ent.erase(it);
+			}
+		}
+	}
+	CallMethod<0x4EFCD0, void*, CAEAudioEntity*, uint8_t>(ts, entity, a3);
 }
 
 class EarShot {
 public:
 	EarShot() {
+		// If you remove this, you are automatically getting no more support from me.
 		if (_strcmpi(PLUGIN_FILENAME, "EarShot.asi") > 0) {
 			if (!Error("Renaming of this plugin is not allowed. Please, keep it 'EarShot.asi'!"))
 			{
@@ -1530,288 +2719,224 @@ public:
 			//	DebugMenuAddVarBool8("EarShot", "Toggle reverb type (EAX or EFX)", (int8_t*)&EAXOrNot, nullptr);
 		}
 		// Init everything
-		Events::initRwEvent += []
+		Events::initRwEvent.after += []()
 			{
+				Loaders::InitializeIniFile(1);
 				AudioManager.Initialize();
 			};
-		patch::RedirectCall({ 0x504D11, 0x504CD2 }, PlayMinigunBarrelStopSound);
-		patch::RedirectCall(0x4DF81B, HookedCAudioEngine__ReportWeaponEvent); // LS gunfire ambience
-		patch::RedirectCall(0x4DFAE6, HookedFireProjectile);
-		patch::RedirectCall(0x72BB37, HookedCAEWeatherAudioEntity__AddAudioEvent);
-		//patch::RedirectCall({ 0x503C12, 0x503CC9 }, RequestNewSoundHooksForStealth);
-		//patch::RedirectCall(0x4E6A67, PlayChainsawEvent);
-		//patch::RedirectCall(0x504E5A, PlayChainsawStopSound);
-#ifdef QUAKE_KILLSOUNDS_TEST
-		patch::RedirectCall(0x4B93AA, HookedRegisterKillByPlayer);
-#endif
-		Events::processScriptsEvent += [] {
-			if (initializationstatus != -2) return;
-			initializationstatus = 0;
 
-			Events::gameProcessEvent += [] {
-				//	Log("CWeather::WeatherRegion: %d", CWeather::WeatherRegion);
-				if (initializationstatus == 0) {
-					if (!AudioManager.GetDevice() || !AudioManager.GetContext()) {
-						modMessage("Could not initialize OpenAL audio engine.");
-						initializationstatus = -1;
-					}
-				}
+		Events::initGameEvent.after += []()
+			{
+				Loaders::RegisterAllWeapons();
+				Loaders::InitializeIniFile(2);
+				Loaders::InstallHooks();
+			};
 
-				// Don't update any fire sound if the game is paused
-				if (!FrontEndMenuManager.m_bMenuActive)
+		Events::gameProcessEvent += []() {
+
+			// Don't update any fire sound if the game is paused
+			if (!FrontEndMenuManager.m_bMenuActive)
+			{
+				AudioManager.UpdateFireSoundCleanup();
+				// Play the ambience when it's not rainy and the screen didn't fade out yet
+				if (CWeather::Rain <= 0.0f && TheCamera.GetScreenFadeStatus() == 0)
 				{
-					AudioManager.UpdateFireSoundCleanup();
-					// Play the ambience when it's not rainy and the screen didn't fade out yet
-					if (CWeather::Rain <= 0.0f && TheCamera.GetScreenFadeStatus() == 0)
+					AudioManager.PlayAmbienceSFX(cameraposition, eWeaponType(0), true);
+				}
+			}
+			float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+			bool isNight = (CClock::ms_nGameClockHours >= 20 || CClock::ms_nGameClockHours < 6);
+			bool isRiot = CGameLogic::LaRiotsActiveHere();
+			for (auto& inst : AudioManager.audiosplaying)
+			{			
+				// We update each source's gain so when the screen fades, the sound can fade smoothly as well
+				if (inst) {
+					ALint state = AudioManager.GetSourceState(inst->source);
+					ALint buffer;
+					alGetSourcei(inst->source, AL_BUFFER, &buffer);
+					ALint fmt = AudioManager.GetBufferFormat((ALuint)buffer);
+
+					float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
+					float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
+					gameVol *= fader;
+
+					if (state == AL_PLAYING)
 					{
-						AudioManager.PlayAmbienceSFX(cameraposition, eWeaponType(0), true);
+						if (inst->isAmbience) {
+							if (fmt == AL_FORMAT_STEREO_FLOAT32)
+							{
+								// They are loud as hell, decrease the gain a bit
+								alSourcei(inst->source, AL_SOURCE_RELATIVE, AL_TRUE);
+								alSource3f(inst->source, AL_POSITION, 0.0f, 0.0f, 0.0f);
+								gameVol *= stereoAmbienceVol;
+
+							}
+							else if (fmt == AL_FORMAT_MONO_FLOAT32)
+							{
+								if (CCutsceneMgr::ms_running || CGame::currArea > 0)
+									gameVol = 0.0f; // mute to not interrupt anything
+							}
+							if (!inst->isGunfireAmbience && !inst->isManualAmbience && inst->source != 0)
+							{
+								static auto GetAmbienceTimeOfDay = [&](const std::string& stem) -> EAmbienceTime {
+									//LOG("GetAmbienceTimeOfDay: stem='%s'", stem.c_str());
+									if (stem.ends_with("_night") || NameEndsWithIndexedSuffix(stem, "_night")) return EAmbienceTime::Night;
+									if (stem.ends_with("_riot") || NameEndsWithIndexedSuffix(stem, "_riot")) return EAmbienceTime::Riot;
+									return EAmbienceTime::Day;
+									};
+								// we stop ambience sounds that don't fit the time of day or riot state
+								std::string stem = inst->path.stem().string();
+								bool isReallyAAmbience =
+									NameStartsWithIndexedSuffix(stem.c_str(), "ambience")
+									|| IsMatchingName(stem.c_str(), "ambience") ||
+									(stem.ends_with("_night") || NameEndsWithIndexedSuffix(stem, "_night")) ||
+									(stem.ends_with("_riot") || NameEndsWithIndexedSuffix(stem, "_riot"));
+								if (isReallyAAmbience) {
+									//if (buff.second == 0) continue;
+									auto timeOfDay = GetAmbienceTimeOfDay(stem);
+									//LOG("Time of day %d", timeOfDay);
+									bool cantPlay = (timeOfDay == EAmbienceTime::Night && !isNight) || (timeOfDay == EAmbienceTime::Riot && !isRiot);
+
+									if (cantPlay)
+									{
+										//LOG("Stopped for time of day %d", timeOfDay);
+										alSourceStop(inst->source);
+										alDeleteSources(1, &inst->source);
+										inst->source = 0;
+									}
+								}
+
+							}
+						}
+
+						// they compute fadings for themselves, don't mess with those sounds
+						bool Ok = NameStartsWithIndexedSuffix(inst->nameBuffer.c_str(), { "minigun_barrelspinloop", "minigun_barrelspinend", "low_ammo" })
+							|| IsMatchingName(inst->nameBuffer.c_str(), { "minigun_barrelspinloop", "minigun_barrelspinend", "low_ammo" });
+						if (!Ok)
+						{
+							AudioManager.SetSourceGain(inst->source, gameVol);
+						}
+						//LOG("inst->pitch: %.2f, pitch: %.2f", inst->pitch, pitch);
+						//AudioManager.SetSourcePitch(inst->source, inst->readPitch ? inst->pitch : pitch);
 					}
 				}
-				// Install hooks and load weapon sounds
-				if (initializationstatus != -1) {
-					if (initializationstatus == 0) {
 
-						Loaders::LoadMainWeaponsFolder();
-
-						subhookCAEWeaponAudioEntity__WeaponFire = subhook_new((void*)(originalCAEWeaponAudioEntity__WeaponFire)0x504F80, HookedCAEWeaponAudioEntity__WeaponFire, subhook_flags_t(0));
-						subhookCAEWeaponAudioEntity__WeaponReload = subhook_new((void*)(originalCAEWeaponAudioEntity__WeaponReload)0x503690, HookedCAEWeaponAudioEntity__WeaponReload, subhook_flags_t(0));
-						subhookCAEPedAudioEntity__HandlePedHit = subhook_new((void*)(originalCAEPedAudioEntity__HandlePedHit)0x4E1CC0, HookedCAEPedAudioEntity__HandlePedHit, subhook_flags_t(0));
-						subhookCAEPedAudioEntity__HandlePedSwing = subhook_new((void*)(originalCAEPedAudioEntity__HandlePedSwing)0x4E1A40, HookedCAEPedAudioEntity__HandlePedSwing, subhook_flags_t(0));
-						subhookCAEExplosionAudioEntity__AddAudioEvent = subhook_new((void*)(originalCAEExplosionAudioEntity__AddAudioEvent)0x4DCBE0, HookedCAEExplosionAudioEntity_AddAudioEvent, subhook_flags_t(0));
-						subhookCAEPedAudioEntity__HandlePedJacked = subhook_new((void*)(originalCAEPedAudioEntity__HandlePedJacked)0x4E2350, CAEPedAudioEntity__HandlePedJacked, subhook_flags_t(0));
-						subhookCAEFireAudioEntity__AddAudioEvent = subhook_new((void*)(originalCAEFireAudioEntity__AddAudioEvent)0x4DD3C0, HookedCAEFireAudioEntity__AddAudioEvent, subhook_flags_t(0));
-						subhookCAudioEngine__ReportBulletHit = subhook_new((void*)(originalCAudioEngine__ReportBulletHit)0x506EC0, HookedCAudioEngine__ReportBulletHit, subhook_flags_t(0));
-						subhookCAEPedAudioEntity__AddAudioEvent = subhook_new((void*)(originalCAEPedAudioEntity__AddAudioEvent)0x4E2BB0, HookedCAEPedAudioEntity__AddAudioEvent, subhook_flags_t(0));
-						subhookCExplosion__AddExplosion = subhook_new((void*)(originalCExplosion__AddExplosion)0x736A50, TriggerTankFireHooked, subhook_flags_t(0));
-						subhookCAudioEngine__ReportFrontEndAudioEvent = subhook_new((void*)(originalCAudioEngine__ReportFrontEndAudioEvent)0x506EA0, CAudioEngine__ReportFrontEndAudioHooked, subhook_flags_t(0));
-						//	subhookReportCollision = subhook_new((void*)(tReportCollision)0x506EB0, HookedReportCollision, subhook_flags_t(0));
+				// Pause audio's when it's time to do so
+				bool shouldPause = FrontEndMenuManager.m_bMenuActive ||
+					CTimer::m_UserPause ||
+					CTimer::m_CodePause ||
+					CTimer::ms_fTimeScale <= 0.0f;
+				if (shouldPause)
+				{
+					AudioManager.PauseSource(inst.get());
+				}
+				else
+				{
+					AudioManager.ResumeSource(inst.get());
+				}
+				AudioManager.AttachReverbToSource(inst->source);
+			}
 
 
-						subhook_install(subhookCAEWeaponAudioEntity__WeaponFire);
-						subhook_install(subhookCAEWeaponAudioEntity__WeaponReload);
-						subhook_install(subhookCAEPedAudioEntity__HandlePedHit);
-						subhook_install(subhookCAEPedAudioEntity__HandlePedSwing);
-						subhook_install(subhookCAEExplosionAudioEntity__AddAudioEvent);
-						subhook_install(subhookCAEPedAudioEntity__HandlePedJacked);
-						subhook_install(subhookCAEFireAudioEntity__AddAudioEvent);
-						subhook_install(subhookCAudioEngine__ReportBulletHit);
-						subhook_install(subhookCAEPedAudioEntity__AddAudioEvent);
-						subhook_install(subhookCExplosion__AddExplosion);
-						subhook_install(subhookCAudioEngine__ReportFrontEndAudioEvent);
-						//subhook_install(subhookReportCollision);
-						Events::gameProcessEvent += [] 
-							{
-								float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
-								bool isNight = (CClock::ms_nGameClockHours >= 20 || CClock::ms_nGameClockHours < 6);
-								bool isRiot = CGameLogic::LaRiotsActiveHere();
-								for (auto& inst : AudioManager.audiosplaying)
-								{
-									// This gave me PTSD, it created one bug to another, and i managed to get it fixed
-									// So i prefer to not touch it anymore and leave it as it is
-									if (inst->source == barrelSpinSource && inst->shooter && inst->minigunBarrelSpin)
-									{
-										ALint spinState;
-										spinState = AudioManager.GetSourceState(inst->source);
-										eWeaponType weaponType = inst->shooter->m_aWeapons[inst->shooter->m_nSelectedWepSlot].m_eWeaponType;
-										CTaskSimpleUseGun* shooting = inst->shooter->m_pIntelligence->GetTaskUseGun();
-										bool gunTaskFinished = shooting && shooting->m_bIsFinished;
-										bool shouldStop = (weaponType != inst->WeaponType || (gunTaskFinished) || inst->shooter->m_ePedState == PEDSTATE_DEAD || inst->shooter->m_fHealth <= 0.0f);
-										if (spinState == AL_PLAYING && shouldStop)
-										{
-											//	inst->shooter->m_weaponAudio.PlayMiniGunStopSound(inst->shooter);
-											AudioManager.PlayOrStopBarrelSpinSound(inst->shooter, &weaponType, false, gunTaskFinished ? true : false);
-											//	Log("Gargle");
-										}
-									}
-									// We update each source's gain so when the screen fades, the sound can fade smoothly as well
-									ALint state;
-									state = AudioManager.GetSourceState(inst->source);
-									ALint buffer;
-									alGetSourcei(inst->source, AL_BUFFER, &buffer);
-									ALint fmt = AudioManager.GetBufferFormat((ALuint)buffer);
+			// The listener is the player, set appropriate values...
+			CVector pos = *TheCamera.GetGameCamPosition();
+			cameraposition = pos;
+			alListener3f(AL_POSITION, cameraposition.x, cameraposition.y, cameraposition.z);
+			// For correct sound panning we use camera's heading, ensuring convincing 3D audio
+			CVector vecCamDir = TheCamera.m_mCameraMatrix.GetForward();
+			CVector vecCamUpDir = TheCamera.m_mCameraMatrix.GetUp();
+			vecCamDir.Normalise();
+			vecCamUpDir.Normalise();
+			ALfloat orientation[6] =
+			{
+			vecCamDir.x, vecCamDir.y, vecCamDir.z, // forward vector
+			vecCamUpDir.x, vecCamUpDir.y, vecCamUpDir.z // up vector
+			};
 
-									float gameVol = AEAudioHardware.m_fEffectMasterScalingFactor;
-									float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
-									float gain = gameVol * fader;
-									if ((inst->isAmbience/* || inst->isManualAmbience*/) && state == AL_PLAYING && (fmt == AL_FORMAT_STEREO_FLOAT32 || fmt == AL_FORMAT_MONO_FLOAT32))
-									{
-										// They are loud as hell, decrease the gain a bit
-										if (fmt == AL_FORMAT_STEREO_FLOAT32) {
-											alSourcei(inst->source, AL_SOURCE_RELATIVE, AL_TRUE);
-											alSource3f(inst->source, AL_POSITION, 0.0f, 0.0f, 0.0f);
-											gain *= stereoAmbienceVol;
-										}
-
-										if (CCutsceneMgr::ms_running || CGame::currArea > 0)
-											gain = 0.0f; // mute to not interrupt anything
-
-										AudioManager.SetSourceGain(inst->source, gain);
-									}
-									else if (state == AL_PLAYING)
-									{
-										// they compute fadings for themselves, don't mess with those sounds
-										bool notOk = NameStartsWithIndexedSuffix(inst->nameBuffer.c_str(), { "spin", "spin_end", "low_ammo" })
-											|| IsMatchingName(inst->nameBuffer.c_str(), { "spin", "spin_end", "low_ammo" });
-										if (!notOk)
-										{
-											AudioManager.SetSourceGain(inst->source, gain);
-										}
-									}
-
-									// Pause audio's when it's time to do so
-									bool shouldPause = FrontEndMenuManager.m_bMenuActive ||
-										CTimer::m_UserPause ||
-										CTimer::m_CodePause ||
-										CTimer::ms_fTimeScale <= 0.0f;
-									if (shouldPause)
-									{
-										AudioManager.PauseSource(inst.get());
-									}
-									else
-									{
-										AudioManager.ResumeSource(inst.get());
-									}
-									AudioManager.AttachReverbToSource(inst.get()->source);
-
-									static auto GetAmbienceTimeOfDay = [&](const std::string& stem) -> EAmbienceTime {
-										//Log("GetAmbienceTimeOfDay: stem='%s'", stem.c_str());
-										if (stem.ends_with("_night") || NameEndsWithIndexedSuffix(stem, "_night")) return EAmbienceTime::Night;
-										if (stem.ends_with("_riot") || NameEndsWithIndexedSuffix(stem, "_riot")) return EAmbienceTime::Riot;
-										return EAmbienceTime::Day;
-										};
-									// we stop ambience sounds that don't fit the time of day or riot state
-									if (inst && state == AL_PLAYING && inst->isAmbience && !inst->isGunfireAmbience && !inst->isManualAmbience && inst->source != 0)
-									{
-											std::string stem = inst->path.stem().string();
-											bool isReallyAAmbience = 
-												NameStartsWithIndexedSuffix(stem.c_str(), "ambience")
-												|| IsMatchingName(stem.c_str(), "ambience") ||
-												(stem.ends_with("_night") || NameEndsWithIndexedSuffix(stem, "_night")) ||
-												(stem.ends_with("_riot") || NameEndsWithIndexedSuffix(stem, "_riot"));
-											if (isReallyAAmbience) {
-												//if (buff.second == 0) continue;
-												auto timeOfDay = GetAmbienceTimeOfDay(stem);
-												//Log("Time of day %d", timeOfDay);
-												bool cantPlay = (timeOfDay == EAmbienceTime::Night && !isNight) || (timeOfDay == EAmbienceTime::Riot && !isRiot);
-
-												if (cantPlay)
-												{
-													//Log("Stopped for time of day %d", timeOfDay);
-													alSourceStop(inst->source);
-													alDeleteSources(1, &inst->source);
-													inst->source = 0;
-												}
-											}
-										}
-								}
-							};
-					}
-					// The listener is the player, set appropriate values...
-					CVector pos = *TheCamera.GetGameCamPosition();
-					cameraposition = pos;
-					alListener3f(AL_POSITION, cameraposition.x, cameraposition.y, cameraposition.z);
-					// For correct sound panning we use camera's heading, ensuring convincing 3D audio
-					CVector vecCamDir = TheCamera.m_mCameraMatrix.GetForward();
-					CVector vecCamUpDir = TheCamera.m_mCameraMatrix.GetUp();
-					vecCamDir.Normalise();
-					vecCamUpDir.Normalise();
-					ALfloat orientation[6] =
+			alListenerfv(AL_ORIENTATION, orientation);
+			AudioManager.audiosplaying.erase(remove_if(AudioManager.audiosplaying.begin(), AudioManager.audiosplaying.end(),
+				[&](std::shared_ptr<SoundInstance>& inst) {
+					//float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+					ALint state = AudioManager.GetSourceState(inst->source);
+					// Update missile sound position and velocity
+					if (!inst->isFire && (!inst->firePtr || !inst->fireFX) && state == AL_PLAYING)
 					{
-					vecCamDir.x, vecCamDir.y, vecCamDir.z, // forward vector
-					vecCamUpDir.x, vecCamUpDir.y, vecCamUpDir.z // up vector
-					};
+						if (inst->entity && IsEntityPointerValid(inst->entity) && inst->bIsMissile && inst->missileSource != 0 && inst->source == inst->missileSource) {
+							alSource3f(inst->missileSource, AL_POSITION,
+								inst->entity->GetPosition().x,
+								inst->entity->GetPosition().y,
+								inst->entity->GetPosition().z);
+							alSource3f(inst->missileSource, AL_VELOCITY,
+								inst->entity->m_vecMoveSpeed.x,
+								inst->entity->m_vecMoveSpeed.y,
+								inst->entity->m_vecMoveSpeed.z);
 
-					alListenerfv(AL_ORIENTATION, orientation);
-					AudioManager.audiosplaying.erase(remove_if(AudioManager.audiosplaying.begin(), AudioManager.audiosplaying.end(),
-						[&](const std::shared_ptr<SoundInstance>& inst) {
-							//float pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
-							ALint state;
-							state = AudioManager.GetSourceState(inst->source);
-							// Update missile sound position and velocity
-							if (!inst->isFire && (!inst->firePtr || !inst->fireFX) && state == AL_PLAYING)
-							{
-								if (inst->entity && IsEntityPointerValid(inst->entity) && inst->bIsMissile && inst->missileSource != 0 && inst->source == inst->missileSource) {
-									alSource3f(inst->missileSource, AL_POSITION,
-										inst->entity->GetPosition().x,
-										inst->entity->GetPosition().y,
-										inst->entity->GetPosition().z);
-									alSource3f(inst->missileSource, AL_VELOCITY,
-										inst->entity->m_vecMoveSpeed.x,
-										inst->entity->m_vecMoveSpeed.y,
-										inst->entity->m_vecMoveSpeed.z);
+							CVector direction = inst->entity->GetForward();
+							alSourcef(inst->missileSource, AL_CONE_INNER_ANGLE, 60.0f);
+							alSourcef(inst->missileSource, AL_CONE_OUTER_ANGLE, 180.0f);
+							alSourcef(inst->missileSource, AL_CONE_OUTER_GAIN, 0.3f);
+							alSource3f(inst->missileSource, AL_DIRECTION, direction.x, direction.y, direction.z);
 
-									CVector direction = inst->entity->GetForward();
-									alSourcef(inst->missileSource, AL_CONE_INNER_ANGLE, 60.0f);
-									alSourcef(inst->missileSource, AL_CONE_OUTER_ANGLE, 180.0f);
-									alSourcef(inst->missileSource, AL_CONE_OUTER_GAIN, 0.3f);
-									alSource3f(inst->missileSource, AL_DIRECTION, direction.x, direction.y, direction.z);
-
-								}
-
-								if (inst->entity && IsEntityPointerValid(inst->entity)) {
-									alSource3f(inst->source, AL_POSITION,
-										inst->entity->GetPosition().x,
-										inst->entity->GetPosition().y,
-										inst->entity->GetPosition().z);
-									alSource3f(inst->source, AL_VELOCITY,
-										inst->entity->m_vecMoveSpeed.x,
-										inst->entity->m_vecMoveSpeed.y,
-										inst->entity->m_vecMoveSpeed.z);
-									CVector direction = inst->entity->GetForward();
-									alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
-								}
-								else if (inst->shooter && IsPedPointerValid(inst->shooter))
-								{
-									alSource3f(inst->source, AL_POSITION,
-										inst->shooter->GetPosition().x,
-										inst->shooter->GetPosition().y,
-										inst->shooter->GetPosition().z);
-									alSource3f(inst->source, AL_VELOCITY,
-										inst->shooter->m_vecMoveSpeed.x,
-										inst->shooter->m_vecMoveSpeed.y,
-										inst->shooter->m_vecMoveSpeed.z);
-									CVector direction = inst->shooter->GetForward();
-									alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
-								}
-							}
-							// Update minigun spin pos relative to the owner
-							if (inst->shooter && inst->minigunBarrelSpin && inst->source != 0)
-							{
-								alSource3f(inst->source, AL_POSITION, inst->shooter->GetPosition().x, inst->shooter->GetPosition().y, inst->shooter->GetPosition().z);
-							}
-
-							// To prevent overflow, we erase any sources that are no longer used
-							if (state != AL_PLAYING && state != AL_PAUSED) {
-								//Log("Removed source '%d'", inst->source);
-								alDeleteSources(1, &inst->source);
-								inst->source = 0;
-								return true;
-							}
-							return false;
-						}), AudioManager.audiosplaying.end());
-
-#ifdef QUAKE_KILLSOUNDS_TEST
-					CPlayerPed* playa = FindPlayerPed();
-					ManageLastManAndTeamKill();
-					// We reset the killstreak counter here, when needed (Replicated Quake behaviour).
-					// When we die OR
-					// 10 seconds passed since last kill, reset counter
-					if (killCounter > 0 && !wasHeadShotted) {
-						uint32_t now = CTimer::m_snTimeInMilliseconds;
-						bool playerDead = (playa && playa->m_fHealth <= 0.0f);
-						if (playerDead || (now - lastTimePedKilled > 10000))
+						}
+						// Update regular sound position and velocity if it's attached to some entity
+						if (inst->entity && IsEntityPointerValid(inst->entity)) {
+							alSource3f(inst->source, AL_POSITION,
+								inst->entity->GetPosition().x,
+								inst->entity->GetPosition().y,
+								inst->entity->GetPosition().z);
+							alSource3f(inst->source, AL_VELOCITY,
+								inst->entity->m_vecMoveSpeed.x,
+								inst->entity->m_vecMoveSpeed.y,
+								inst->entity->m_vecMoveSpeed.z);
+							CVector direction = inst->entity->GetForward();
+							alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
+						}
+						else if (inst->shooter && IsPedPointerValid(inst->shooter))
 						{
-							Log("Counter reset");
-							killCounter = 0;
+							alSource3f(inst->source, AL_POSITION,
+								inst->shooter->GetPosition().x,
+								inst->shooter->GetPosition().y,
+								inst->shooter->GetPosition().z);
+							alSource3f(inst->source, AL_VELOCITY,
+								inst->shooter->m_vecMoveSpeed.x,
+								inst->shooter->m_vecMoveSpeed.y,
+								inst->shooter->m_vecMoveSpeed.z);
+							CVector direction = inst->shooter->GetForward();
+							alSource3f(inst->source, AL_DIRECTION, direction.x, direction.y, direction.z);
 						}
 					}
+
+					// To prevent overflow, we erase any sources that are no longer used
+					if (state != AL_PLAYING && state != AL_PAUSED) {
+						//LOG("Removed source '%d'", inst->source);
+						alDeleteSources(1, &inst->source);
+						inst->source = 0;
+						inst.reset();
+						return true;
+					}
+					return false;
+				}), AudioManager.audiosplaying.end());
+
+#ifdef QUAKE_KILLSOUNDS_TEST
+			CPlayerPed* playa = FindPlayerPed();
+			ManageLastManAndTeamKill();
+			// We reset the killstreak counter here, when needed (Replicated Quake behaviour).
+			// When we die OR
+			// 10 seconds passed since last kill, reset counter
+			if (killCounter > 0 && !wasHeadShotted) {
+				uint32_t now = CTimer::m_snTimeInMilliseconds;
+				bool playerDead = (playa && playa->m_fHealth <= 0.0f);
+				if (playerDead || (now - lastTimePedKilled > 10000))
+				{
+					LOG("Counter reset");
+					killCounter = 0;
+				}
+			}
 #endif
 
-				}
+		};
 
-				if (initializationstatus == 0) initializationstatus = 1;
-				};
-			};
+			
 
 		// Shut down everything
 		shutdownGameEvent += []()
@@ -1834,7 +2959,7 @@ public:
 					if (inst->bIsMissile) {
 						if (inst->source == inst->missileSource)
 						{
-							Log("removing missile source during reload %d", inst->source);
+							LOG("removing missile source during reload %d", inst->source);
 							alDeleteSources(1, &inst->missileSource);
 							inst->missileSource = 0;
 						}
@@ -1876,7 +3001,7 @@ public:
 					if (inst->bIsMissile) {
 						if (inst->entity == ent && inst->source == inst->missileSource)
 						{
-							Log("Removing missile source %d", inst->missileSource);
+							LOG("Removing missile source %d", inst->missileSource);
 							alDeleteSources(1, &inst->missileSource);
 							inst->missileSource = 0;
 						}
@@ -1884,7 +3009,7 @@ public:
 				}
 			};
 
-	}
+	};
 } earShot;
 
 // So, why this exists?

@@ -14,20 +14,21 @@
 #include <CExplosion.h>
 #include <eAudioEvents.h>
 #include "AudioManager.h"
+#include <CAEWeatherAudioEntity.h>
+#include <CAudioEngine.h>
+#include "CAEPedAudioEntity.h"
 using namespace plugin;
-using namespace std;
 namespace fs = std::filesystem;
-static CdeclEvent <AddressList<0x748E6B, H_CALL>, PRIORITY_BEFORE, ArgPickNone, void()> shutdownGameEvent;
-static CdeclEvent <AddressList<0x564372, H_CALL>, PRIORITY_AFTER, ArgPickNone, void()> ClearForRestartEvent;
-static CdeclEvent <AddressList<0x56A46E, H_CALL>, PRIORITY_AFTER, ArgPickNone, void()> ClearExcitingStuffFromAreaEvent;
-static CdeclEvent <AddressList<0x56E975, H_CALL>, PRIORITY_AFTER, ArgPickNone, void()> MakePlayerSafeEvent;
-static CdeclEvent <AddressList<0x738AFF, H_CALL, 0x73997A, H_CALL, 0x739A17, H_CALL, 0x739AD0, H_CALL>, PRIORITY_AFTER, ArgPickN<CEntity*, 0>, void(CEntity* ent)> WorldRemoveProjEvent;
-inline uint32_t interiorIntervalMin = 5000;  // ms
-inline uint32_t interiorIntervalMax = 10000; // ms
+inline CdeclEvent <AddressList<0x748E6B, H_CALL>, PRIORITY_BEFORE, ArgPickNone, void()> shutdownGameEvent;
+inline CdeclEvent <AddressList<0x564372, H_CALL>, PRIORITY_AFTER, ArgPickNone, void()> ClearForRestartEvent;
+inline CdeclEvent <AddressList<0x56A46E, H_CALL>, PRIORITY_AFTER, ArgPickNone, void()> ClearExcitingStuffFromAreaEvent;
+inline CdeclEvent <AddressList<0x56E975, H_CALL>, PRIORITY_AFTER, ArgPickNone, void()> MakePlayerSafeEvent;
+inline CdeclEvent <AddressList<0x738AFF, H_CALL, 0x73997A, H_CALL, 0x739A17, H_CALL, 0x739AD0, H_CALL>, PRIORITY_AFTER, ArgPickN<CEntity*, 0>, void(CEntity* ent)> WorldRemoveProjEvent;
 inline uint32_t fireIntervalMin = 5000;
 inline uint32_t fireIntervalMax = 10000;
 inline uint32_t zoneIntervalMin = 5000;
 inline uint32_t zoneIntervalMax = 10000;
+
 inline float distanceForDistantExplosion = 100.0f;
 inline float distanceForDistantGunshot = 50.0f;
 inline float stereoAmbienceVol = 0.3f;
@@ -35,6 +36,13 @@ inline std::unordered_map<CEntity*, int> g_lastExplosionType;
 
 // WIP of my fun idea made out of boredom, define to enable!
 //#define QUAKE_KILLSOUNDS_TEST
+
+inline std::string trimStr(const std::string& s) {
+	size_t a = s.find_first_not_of(" \t\r\n");
+	if (a == std::string::npos) return std::string();
+	size_t b = s.find_last_not_of(" \t\r\n");
+	return s.substr(a, b - a + 1);
+}
 
 inline auto modname = string("EarShot");
 inline auto modMessage = [&](const string& messagetext, UINT messageflags = MB_OK) {
@@ -58,24 +66,23 @@ inline auto outputPath = [&](fs::path* filepath)
 	};
 
 // String cases converting
-inline auto caseLower = [&](string casedstring)
-	{
-		string caseless;
-		for (char ch : casedstring) {
-			if (ch >= 'A' && ch <= 'Z') ch = tolower(ch);
-			caseless += ch;
-		}
-		return caseless;
-	};
-inline auto caseUpper = [&](string casedstring)
-	{
-		string caseless;
-		for (char ch : casedstring) {
-			if (ch >= 'a' && ch <= 'z') ch = toupper(ch);
-			caseless += ch;
-		}
-		return caseless;
-	};
+inline auto caseLower(const std::string& s) {
+	std::string out = s;
+	std::transform(out.begin(), out.end(), out.begin(),
+		[](unsigned char ch) { return std::tolower(ch); });
+	return out;
+}
+
+inline auto caseUpper(const std::string& s) {
+	std::string out = s;
+	std::transform(out.begin(), out.end(), out.begin(),
+		[](unsigned char ch) { return std::toupper(ch); });
+	return out;
+}
+inline auto vecContains = [](const std::vector<std::string>& v, const std::string& s) -> bool 
+{
+	return std::find(v.begin(), v.end(), s) != v.end();
+};
 
 inline auto nameType = [&](string* weaponname, eWeaponType* weapontype)
 	{
@@ -84,19 +91,29 @@ inline auto nameType = [&](string* weaponname, eWeaponType* weapontype)
 		return (*weapontype >= eWeaponType::WEAPONTYPE_UNARMED);
 	};
 
-inline int initializationstatus = -2;
-
 typedef void(__thiscall* originalCAEWeaponAudioEntity__WeaponFire)(eWeaponType weaponType, CPhysical* entity, int audioEventId);
 typedef void(__thiscall* originalCAEWeaponAudioEntity__WeaponReload)(eWeaponType weaponType, CPhysical* entity, int audioEventId);
 typedef void(__thiscall* originalCAEPedAudioEntity__HandlePedHit)(int a2, CPhysical* a3, unsigned __int8 a4, float a5, unsigned int a6);
 typedef char(__thiscall* originalCAEPedAudioEntity__HandlePedSwing)(int a2, int a3, int a4);
 typedef void(__thiscall* originalCAEExplosionAudioEntity__AddAudioEvent)(int event, CVector* pos, float volume);
 typedef char(__thiscall* originalCAEPedAudioEntity__HandlePedJacked)(int AudioEvent);
-typedef void(__fastcall* originalCAEFireAudioEntity__AddAudioEvent)(int AudioEvent, CVector* posn);
-typedef int(__fastcall* originalCAudioEngine__ReportBulletHit)(CEntity* entity, eSurfaceType surface, const CVector& posn, float angleWithColPointNorm);
+typedef void(__thiscall* originalCAEFireAudioEntity__AddAudioEvent)(int AudioEvent, CVector* posn);
+typedef int(__thiscall* originalCAudioEngine__ReportBulletHit)(CEntity* entity, eSurfaceType surface, const CVector& posn, float angleWithColPointNorm);
 typedef void(__thiscall* originalCAEPedAudioEntity__AddAudioEvent)(eAudioEvents event, float volume, float speed, CPhysical* ped, uint8_t surfaceId, int32_t a7, uint32_t maxVol);
 typedef bool(__cdecl* originalCExplosion__AddExplosion)(CEntity* victim, CEntity* creator, eExplosionType type, CVector pos, uint32_t lifetime, uint8_t usesSound, float cameraShake, uint8_t bInvisible);
 typedef void(__thiscall* originalCAudioEngine__ReportFrontEndAudioEvent)(eAudioEvents eventId, float volumeChange, float speed);
+typedef void(__thiscall* originalCAudioEngine__ReportWeaponEvent)(eWeaponType weaponType, CPhysical* physical, eAudioEvents aEvent);
+typedef void(__thiscall* originalPlayChainsawStopSound)(CPhysical* entity);
+typedef void(__thiscall* originalPlayChainsawEvent)(CPed* ped, int Aevent);
+typedef void(__thiscall* originalCAEWeaponAudioEntity__PlayFlameThrowerSounds)(
+	CPhysical* entity,
+	__int16 sfx1,
+	__int16 sfx2,
+	int audioEventId,
+	float audability,
+	float speed);
+typedef void(__thiscall* originalCAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop)(CPhysical* entity);
+typedef void(__thiscall* originalCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop)();
 inline auto subhookCAEWeaponAudioEntity__WeaponFire = subhook_t();
 inline auto subhookCAEWeaponAudioEntity__WeaponReload = subhook_t();
 inline auto subhookCAEPedAudioEntity__HandlePedHit = subhook_t();
@@ -108,7 +125,120 @@ inline auto subhookCAudioEngine__ReportBulletHit = subhook_t();
 inline auto subhookCAEPedAudioEntity__AddAudioEvent = subhook_t();
 inline auto subhookCExplosion__AddExplosion = subhook_t();
 inline auto subhookCAudioEngine__ReportFrontEndAudioEvent = subhook_t();
-
+inline auto subhookCAudioEngine__ReportWeaponEvent = subhook_t();
+inline auto subhookPlayChainsawStopSound = subhook_t();
+inline auto subhookPlayChainsawEvent = subhook_t();
+inline auto subhookCAEWeaponAudioEntity__PlayFlameThrowerSounds = subhook_t();
+inline auto subhookCAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop = subhook_t();
+inline auto subhookCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop = subhook_t();
+void __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
+	CAEExplosionAudioEntity* t,
+	void* unusedpointer,
+	int Aevent,
+	CVector* posn,
+	float volume
+);
+int __fastcall HookedCAudioEngine__ReportBulletHit(CAudioEngine* engine, int, CEntity* victim, uint8_t surface, const CVector& posn, float angleWithColPointNorm);
+void __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispointer, void* unusedpointer,
+	int AudioEvent, CPhysical* victim, uint8_t Surface, float volume, uint32_t maxVolume
+);
+void __fastcall HookedCAEWeaponAudioEntity__WeaponReload(CAEWeaponAudioEntity* thispointer, void* unusedpointer,
+	eWeaponType weaponType, CPhysical* entity, int audioEventId
+);
+void __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
+	CAEWeaponAudioEntity* thispointer, void* unused,
+	eWeaponType weaponType, CPhysical* victim, int audioEventId
+);
+char __fastcall HookedCAEPedAudioEntity__HandlePedSwing(CAEPedAudioEntity* thispointer, void* unusedpointer,
+	int a2, int a3, int a4
+);
+void __fastcall HookedCAEPedAudioEntity__HandlePedHit(CAEPedAudioEntity* thispointer, void* unusedpointer,
+	int AudioEvent, CPhysical* victim, uint8_t Surface, float volume, uint32_t maxVolume
+);
+void __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
+	CAEExplosionAudioEntity* t,
+	void* unusedpointer,
+	int Aevent,
+	CVector* posn,
+	float volume
+);
+void __fastcall HookedCAEFireAudioEntity__AddAudioEvent(CAEFireAudioEntity* ts, int, int eventId, CVector* posn);
+char __fastcall CAEPedAudioEntity__HandlePedJacked(CAEPedAudioEntity* ts, void*, int AudioEvent);
+void __fastcall HookedCAEPedAudioEntity__AddAudioEvent(CAEPedAudioEntity* ts, void*, eAudioEvents audioEvent, float volume, float speed, CPhysical* ped, uint8_t surfaceId, int32_t a7, uint32_t maxVol);
+void __fastcall HookedCAudioEngine__ReportWeaponEvent(CAudioEngine* engine, void*,
+	int32_t audioEvent, eWeaponType weaponType, CPhysical* physical);
+void __fastcall HookedCAEWeatherAudioEntity__AddAudioEvent(CAEWeatherAudioEntity* ts, void*, int AudioEvent);
+bool __cdecl TriggerTankFireHooked(CEntity* victim, CEntity* creator, eExplosionType type, CVector pos, uint32_t lifetime, uint8_t usesSound, float cameraShake, uint8_t bInvisible);
+void __fastcall CAudioEngine__ReportFrontEndAudioHooked(CAudioEngine* eng, int, eAudioEvents eventId, float volumeChange, float speed);
+void __fastcall PlayMinigunBarrelStopSound(CAEWeaponAudioEntity* ts, int, CPed* ped);
+void __fastcall PlayChainsawStopSound(CAEWeaponAudioEntity* ts, int, CPhysical* entity);
+void __fastcall PlayChainsawEvent(CAEWeaponAudioEntity* ts, int, CPed* ped, int Aevent);
+void __fastcall CAEWeaponAudioEntity__PlayFlameThrowerSounds(
+	CAEWeaponAudioEntity* ts, int,
+	CPhysical* entity,
+	__int16 sfx1,
+	__int16 sfx2,
+	int audioEventId,
+	float audability,
+	float speed);
+void __fastcall CAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop(CAEWeaponAudioEntity* ts, int);
+void __fastcall CAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop(CAEWeaponAudioEntity* ts, int, CPhysical* entity);
+void __fastcall StopFlamethrowerFireSound(CAESound* snd, int);
+void __fastcall CAESound__Dummy(
+	CAESound* ts, int,
+	__int16 bankSlotId,
+	__int16 sfxId,
+	CAEAudioEntity* audio,
+	float x,
+	float y,
+	float z,
+	float volume,
+	float maxDistance,
+	float speed,
+	float timeScale,
+	char a12,
+	__int16 environmentFlags,
+	float a14,
+	__int16 currPlayPosn);
+void __fastcall CAEWeaponAudioEntity__PlayWeaponLoopSound(
+	CAEWeaponAudioEntity* ts, int,
+	CPhysical* entity,
+	__int16 sfxId,
+	int audioEventId,
+	float audability,
+	float speed,
+	unsigned __int32 finalEvent);
+void __fastcall StopSpraycanSound(CAESound* snd, int);
+void __fastcall StopFireExtinguisherSound(CAESound* snd, int);
+void __fastcall StopMinigunSounds(CAESound* snd, int);
+void __fastcall StopChainsawSounds(CAESound* snd, int);
+void __fastcall CAEWeaponAudioEntity__PlayGunSounds(
+	CAEWeaponAudioEntity* ts, int,
+	CPhysical* a2,
+	__int16 emptySfxId,
+	__int16 farSfxId2,
+	__int16 highPitchSfxId3,
+	__int16 lowPitchSfxId4,
+	__int16 echoSfxId5,
+	int nAudioEventId,
+	float volumeChange,
+	float speed1,
+	float speed2);
+void __fastcall CAESound__CalculateVolume(CAESound* snd, int);
+void __fastcall CAEPedAudioEntity__HandleLandingEvent(CAEPedAudioEntity* audio, int, int event);
+void __fastcall CWeaponAudio__PlayStealthEvent(
+	CAEWeaponAudioEntity* ts, int,
+	eWeaponType weapType,
+	CPed* ped,
+	int event);
+void __fastcall CAEWeaponAudioEntity__PlayGoggleSound(CAEWeaponAudioEntity* ts, int, __int16 sfxId, int audioEventId);
+void __fastcall CAEWeaponAudioEntity__PlayCameraSound(
+	CAEWeaponAudioEntity* ts, int,
+	CPhysical* entity,
+	int audioEventId,
+	float audability);
+void __fastcall CPed__RemoveGogglesModel(CPed* ts, int);
+void __fastcall CAESoundManager__CancelSoundsOwnedByAudioEntity(void* ts, int, CAEAudioEntity* entity, uint8_t a3);
 // Define them all in a structure for a better readability
 struct Buffers
 {
@@ -122,9 +252,15 @@ struct Buffers
 	std::vector<ALuint> explosionUnderwaterBuffers;
 	std::vector<ALuint> ricochetBuffers;
 	std::unordered_map<std::string, std::vector<ALuint>> ricochetBuffersPerMaterial;
-	std::unordered_map<std::string, std::vector<ALuint>> footstepBuffersPerSurface;
-	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>> footstepShoeBuffers;
+	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>> footstepShoeBuffers; // by model name
+	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>> footstepShoeByTextureBuffers; // by texture name
 	std::unordered_map<std::string, std::vector<ALuint>> footstepSurfaceBuffers;
+	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>> landingBuffers;
+	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>> landingByShoeTextureBuffers;
+	std::unordered_map<std::string, std::vector<ALuint>> landingPerSurfaceBuffers;
+	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>> collapseBuffers;
+	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>> collapseByShoeTextureBuffers;
+	std::unordered_map<std::string, std::vector<ALuint>> collapsePerSurfaceBuffers;
 	std::vector<ALuint> fireLoopBuffers;
 	std::vector<ALuint> fireBurstBuffers;
 	std::vector<ALuint> fireLoopBuffersSmall;
@@ -161,39 +297,42 @@ struct Buffers
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeDistantBuffers;
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeDebrisBuffers;
 	std::unordered_map<int, std::vector<ALuint>> ExplosionTypeUnderwaterBuffers;
+	// minigun buffers: fire, spin, spin_end
+	ALuint minigunBuffers[3] = { 0 };
+	// chainsaw buffers: idle, active, cutting (flesh), stop
+	ALuint chainsawBuffers[4] = { 0 };
+	// flamethrower buffers: idlegasloop, firestart, fireloop
+	ALuint flamethrowerBuffers[3] = { 0 };
+	ALuint sprayCanLoopBuffer = 0, fireExtinguisherLoopBuffer = 0;
+	// goggles: on, off
+	ALuint cameraShutterBuffer = 0, gogglesBuffer[2] = { 0 };
 };
 
 extern Buffers g_Buffers;
 
-
-// Utility: safely delete an AL buffer
 inline void SafeDeleteBuffer(ALuint& buf) {
 	if (alIsBuffer(buf) && buf != 0) {
-		Log("Freeing buffer %u", buf);
+		LOG("Freeing buffer %u", buf);
 		alDeleteBuffers(1, &buf);
 		buf = 0;
 	}
 }
 
-// Utility: delete all buffers in a vector
 inline void DeleteBufferVector(std::vector<ALuint>& vec) {
 	for (auto& b : vec) SafeDeleteBuffer(b);
 	vec.clear();
 }
 
-// Utility: delete all buffers in map<string, vector<ALuint>>
 inline void DeleteBufferMapVec(std::unordered_map<std::string, std::vector<ALuint>>& map) {
 	for (auto& kv : map) DeleteBufferVector(kv.second);
 	map.clear();
 }
 
-// Utility: delete all buffers in map<int, vector<ALuint>>
 inline void DeleteBufferMapVec(std::unordered_map<int, std::vector<ALuint>>& map) {
 	for (auto& kv : map) DeleteBufferVector(kv.second);
 	map.clear();
 }
 
-// Utility: delete all buffers in nested map<string, map<string, vector<ALuint>>>
 inline void DeleteBufferMapNested(std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>>& map) {
 	for (auto& kv1 : map) {
 		for (auto& kv2 : kv1.second) {
@@ -203,11 +342,92 @@ inline void DeleteBufferMapNested(std::unordered_map<std::string, std::unordered
 	map.clear();
 }
 
-// Utility: delete buffers in map<eWeaponType, ALuint>
 inline void DeleteBufferMapSingle(std::unordered_map<eWeaponType, ALuint>& map) {
 	for (auto& kv : map) SafeDeleteBuffer(kv.second);
 	map.clear();
 }
+
+inline void DeleteBufferMapWithSharedPtr(std::unordered_map<CPed*, std::shared_ptr<SoundInstance>>& map) 
+{
+	for (auto& kv : map) {
+		auto inst = kv.second.get();
+		if (inst && inst->buffer != 0) {
+			LOG("Freeing shared ptr buffer %u for key '%s'", inst->buffer, inst->name);
+			SafeDeleteBuffer(inst->buffer);
+		}
+	}
+	map.clear();
+}
+
+inline void DeleteBufferMapWithSharedPtrAndArray(
+	std::unordered_map<CPed*, std::array<std::shared_ptr<SoundInstance>, 3>>& map)
+{
+	for (auto& kv : map) {
+		auto& instArray = kv.second;
+
+		for (size_t i = 0; i < 3; i++) {
+			auto& inst = instArray[i];
+			if (inst && inst->buffer != 0) {
+				LOG(
+					"Freeing shared ptr array buffer %u for key '%s' index %zu",
+					inst->buffer,
+					inst->name,
+					i
+				);
+				SafeDeleteBuffer(inst->buffer);
+				inst->buffer = 0;
+			}
+		}
+	}
+	map.clear();
+}
+
+inline void DeleteBufferMapWithSharedPtrAndArray(
+	std::unordered_map<CPed*, std::array<std::shared_ptr<SoundInstance>, 5>>& map)
+{
+	for (auto& kv : map) {
+		auto& instArray = kv.second;
+
+		for (size_t i = 0; i < 4; i++) {
+			auto& inst = instArray[i];
+			if (inst && inst->buffer != 0) {
+				LOG(
+					"Freeing shared ptr array buffer %u for key '%s' index %zu",
+					inst->buffer,
+					inst->name,
+					i
+				);
+				SafeDeleteBuffer(inst->buffer);
+				inst->buffer = 0;
+			}
+		}
+	}
+	map.clear();
+}
+
+inline void DeleteBufferMapWithSharedPtrAndArray(
+	std::unordered_map<CPed*, std::array<std::shared_ptr<SoundInstance>, 2>>& map)
+{
+	for (auto& kv : map) {
+		auto& instArray = kv.second;
+
+		for (size_t i = 0; i < 2; i++) {
+			auto& inst = instArray[i];
+			if (inst && inst->buffer != 0) {
+				LOG(
+					"Freeing shared ptr array buffer %u for key '%s' index %zu",
+					inst->buffer,
+					inst->name,
+					i
+				);
+				SafeDeleteBuffer(inst->buffer);
+				inst->buffer = 0;
+			}
+		}
+	}
+	map.clear();
+}
+
 
 inline void DeleteAllBuffers(Buffers& b) {
 	DeleteBufferVector(b.explosionBuffers);
@@ -217,9 +437,16 @@ inline void DeleteAllBuffers(Buffers& b) {
 	DeleteBufferVector(b.ricochetBuffers);
 
 	DeleteBufferMapVec(b.ricochetBuffersPerMaterial);
-	DeleteBufferMapVec(b.footstepBuffersPerSurface);
+	DeleteBufferMapNested(b.landingBuffers);
+	DeleteBufferMapVec(b.landingPerSurfaceBuffers);
+	DeleteBufferMapNested(b.collapseBuffers);
+	DeleteBufferMapVec(b.collapsePerSurfaceBuffers);
+
 	DeleteBufferMapNested(b.footstepShoeBuffers);
 	DeleteBufferMapVec(b.footstepSurfaceBuffers);
+	DeleteBufferMapNested(b.landingByShoeTextureBuffers);
+	DeleteBufferMapNested(b.collapseByShoeTextureBuffers);
+	DeleteBufferMapNested(b.footstepShoeByTextureBuffers);
 
 	DeleteBufferVector(b.fireLoopBuffers);
 	DeleteBufferVector(b.fireBurstBuffers);
@@ -263,6 +490,8 @@ inline void DeleteAllBuffers(Buffers& b) {
 	DeleteBufferMapVec(b.ExplosionTypeExplosionBuffers);
 	DeleteBufferMapVec(b.ExplosionTypeDistantBuffers);
 	DeleteBufferMapVec(b.ExplosionTypeDebrisBuffers);
+	DeleteBufferMapVec(b.ExplosionTypeUnderwaterBuffers);
+
 	// cleanup any per-fire / non-fire instances so they don't reference deleted sources/buffers
 	for (auto& kv : g_Buffers.fireSounds) {
 		auto inst = kv.second.get();
@@ -284,12 +513,119 @@ inline void DeleteAllBuffers(Buffers& b) {
 			inst->source = 0;
 		}
 	}
+	for (int i = 0; i < 3; i++) {
+		if (g_Buffers.minigunBuffers[i] != 0) {
+			LOG("Freeing minigun buffer %d: %u", i, g_Buffers.minigunBuffers[i]);
+			SafeDeleteBuffer(g_Buffers.minigunBuffers[i]);
+		}
+	}
+
+	for (int i = 0; i < 4; i++) {
+		if (g_Buffers.chainsawBuffers[i] != 0) {
+			LOG("Freeing chainsaw buffer %d: %u", i, g_Buffers.chainsawBuffers[i]);
+			SafeDeleteBuffer(g_Buffers.chainsawBuffers[i]);
+		}
+	}
+
+	for (int i = 0; i < 3; i++) {
+		if (g_Buffers.flamethrowerBuffers[i] != 0) {
+			LOG("Freeing flamethrower buffer %d: %u", i, g_Buffers.flamethrowerBuffers[i]);
+			SafeDeleteBuffer(g_Buffers.flamethrowerBuffers[i]);
+		}
+	}
+
+	if (g_Buffers.sprayCanLoopBuffer != 0) {
+		LOG("Freeing spray can loop buffer: %u", g_Buffers.sprayCanLoopBuffer);
+		SafeDeleteBuffer(g_Buffers.sprayCanLoopBuffer);
+	}
+
+	if (g_Buffers.fireExtinguisherLoopBuffer != 0) {
+		LOG("Freeing fire extinguisher loop buffer: %u", g_Buffers.fireExtinguisherLoopBuffer);
+		SafeDeleteBuffer(g_Buffers.fireExtinguisherLoopBuffer);
+	}
+	if (g_Buffers.cameraShutterBuffer != 0) {
+		LOG("Freeing camera shutter buffer: %u", g_Buffers.cameraShutterBuffer);
+		SafeDeleteBuffer(g_Buffers.cameraShutterBuffer);
+	}
+	for (int i = 0; i < 2; i++) {
+		if (g_Buffers.gogglesBuffer[i] != 0) {
+			LOG("Freeing goggles buffers %d: %u", i, g_Buffers.gogglesBuffer[i]);
+			SafeDeleteBuffer(g_Buffers.gogglesBuffer[i]);
+		}
+	}
+
 	g_Buffers.nonFireSounds.clear();
+	DeleteBufferMapWithSharedPtrAndArray(AudioManager.m_apChainsawSounds);
+	DeleteBufferMapWithSharedPtrAndArray(AudioManager.m_apFlamethrowerSounds);
+	DeleteBufferMapWithSharedPtr(AudioManager.m_apSpraycanSounds);
+	DeleteBufferMapWithSharedPtr(AudioManager.m_apFireextinguisherSounds);
+	DeleteBufferMapWithSharedPtrAndArray(AudioManager.m_apMinigunSound);
 
 	// and clear ent vector if it holds CAEFireAudioEntity* references
 	g_Buffers.ent.clear();
-
 }
+
+// PlayChainsawEvent
+inline auto PlayStop = [&](CPhysical* entity, bool playSound = true, bool clearSources = false, bool all = true, int i = 0)
+	{
+		if (entity)
+		{
+			// Play one-shot stop sound
+			if (playSound) {
+				SoundInstanceSettings opts{};
+				opts.maxDist = gAttenuationSettings.chainsawStop.maxDist; // 100.0f
+				opts.refDist = gAttenuationSettings.chainsawStop.refDist; // 1.0f
+				opts.airAbsorption = gAttenuationSettings.chainsawStop.airAbsorption; // 2.0f
+				opts.rollOffFactor = gAttenuationSettings.chainsawStop.rolloffFactor; // 2.0f
+				opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+				opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+				opts.readPitchFromFile = gPitches.chainsawStop.has_value();
+				opts.readPitch = *gPitches.chainsawStop;
+				LOG("chainsawStop pitch is %.2f", *gPitches.chainsawStop);
+				opts.pos = entity->GetPosition();
+				opts.isChainsawSound = true;
+				opts.shooter = (CPed*)entity;
+				AudioManager.PlaySource(g_Buffers.chainsawBuffers[3], opts);
+			}
+		}
+
+		// Stop all looping sounds
+		if (clearSources) {
+			if (!all) {
+				for (auto& pair : AudioManager.m_apChainsawSounds)
+				{
+					auto& inst = pair.second[i];
+					CPed* ped = pair.first;
+					if (inst)
+					{
+						alSourceStop(inst->source);
+						alDeleteSources(1, &inst->source);
+						inst->source = 0;
+						AudioManager.m_apChainsawSounds[ped][i] = nullptr;
+					}
+				}
+			}
+			else {
+				for (auto& pair : AudioManager.m_apChainsawSounds)
+				{
+					for (int j = 0; j < 4; j++) {
+						{
+							auto& inst = pair.second[j];
+							CPed* ped = pair.first;
+							// clear active source only
+							if (inst && inst->source != 0 && AudioManager.GetSourceState(inst->source) == AL_PLAYING)
+							{
+								alSourceStop(inst->source);
+								alDeleteSources(1, &inst->source);
+								inst->source = 0;
+								AudioManager.m_apChainsawSounds[ped][i] = nullptr;
+							}
+						}
+					}
+				}
+			}
+		}
+	};
 
 #define AUDIOPLAY(MODELID, FILESTEM) AudioManager.findWeapon(&weaponType, eModelID(MODELID), std::string(FILESTEM), entity, true)
 #define AUDIOSHOOT(MODELID) AUDIOPLAY(MODELID, "shoot")
@@ -310,6 +646,7 @@ inline void DeleteAllBuffers(Buffers& b) {
 #define AUDIOSPINEND(MODELID) AUDIOPLAY(MODELID, "spin_end")
 #define AUDIOSTEALTHCUT1(MODELID) AUDIOPLAY(MODELID, "stealth_firstcut")
 #define AUDIOSTEALTHCUT2(MODELID) AUDIOPLAY(MODELID, "stealth_secondcut")
+#define AUDIOCHAINSAWSTOP(MODELID) AUDIOPLAY(MODELID, "stop")
 #define AUDIOCALL(AUDIOMACRO) \
     ((entity->m_nType == eEntityType::ENTITY_TYPE_PED && AUDIOMACRO(MODELUNDEFINED)) || AUDIOMACRO(entity->m_nModelIndex))
 #define MODELUNDEFINED eModelID(-1)
@@ -483,6 +820,7 @@ inline bool IsPointWithinSphere(const CSphere& sphere, const CVector& p) {
 
 #include <random>    // std::mt19937, std::random_device
 
+// Custom simple class to generate random integers with less chance of having the same number in subsequent calls
 class RandomIntegers {
 public:
 	int value;  // store the generated random number
@@ -552,6 +890,19 @@ inline bool NameStartsWithIndexedSuffix(const char* name, std::initializer_list<
 
 inline bool AddExplosion(CEntity* victim, CEntity* creator, eExplosionType explosionType, CVector posn, unsigned int time, unsigned char makeSound, float camShake, unsigned char visibility) {
 	return plugin::CallAndReturn<bool, 0x736A50, CEntity*, CEntity*, eExplosionType, CVector, unsigned int, unsigned char, float, unsigned char>(victim, creator, explosionType, posn, time, makeSound, camShake, visibility);
+}
+
+inline const uint32_t GetExportedFunction(const char* szExportName, const char* moduleName)
+{
+	return reinterpret_cast<const uint32_t>(GetProcAddress(GetModuleHandleA(moduleName), szExportName));
+}
+
+// FLA:
+// @returns weapon parent type
+inline int __cdecl GetWeaponHighestParentType(int weaponType)
+{
+	auto Function = reinterpret_cast<int(__cdecl*)(int)>(GetExportedFunction("GetWeaponHighestParentType", "$fastman92limitAdjuster.asi"));
+	return Function(weaponType);
 }
 
 

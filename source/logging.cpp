@@ -5,7 +5,7 @@ bool Logging = false;
 static FILE* LogFile = 0;
 uint64_t maxBytesInLog = 900000; // Maximum number of bytes that will be written in the log file
 uint64_t numBytesInLog; // Number of bytes currently written into thelog file
-void Log(const char* msg, ...) {
+void Log(const char* func, int line, const char* msg, ...) {
     // If log file ain't open yet, open it
     if (LogFile == nullptr && Logging) {
         LogFile = fopen(PLUGIN_PATH("EarShotOpenAL.log"), "a");
@@ -34,10 +34,12 @@ void Log(const char* msg, ...) {
     va_start(args, msg);
     SYSTEMTIME systemTime;
     GetLocalTime(&systemTime);
-    fprintf(LogFile, "[%02d/%02d/%d %02d:%02d:%02d]",
+    fprintf(LogFile, "[%02d/%02d/%d %02d:%02d:%02d] [%s: %d] ",
         systemTime.wDay, systemTime.wMonth, systemTime.wYear,
-        systemTime.wHour, systemTime.wMinute, systemTime.wSecond);
+        systemTime.wHour, systemTime.wMinute, systemTime.wSecond, func, line);
     numBytesInLog += vfprintf(LogFile, msg, args) + 2;
+
+	// Also output to the debug output console if in the debug mode
     #ifdef DEBUG
     std::string message;
     va_list ap_copy;
@@ -50,6 +52,7 @@ void Log(const char* msg, ...) {
     OutputDebugStringA(message.c_str());
     OutputDebugStringA("\n");
     #endif
+
     // Truncate the log if it's too big
     if (numBytesInLog >= maxBytesInLog) {
         ClearLogFile();
