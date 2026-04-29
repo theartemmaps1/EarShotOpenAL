@@ -114,6 +114,9 @@ typedef void(__thiscall* originalCAEWeaponAudioEntity__PlayFlameThrowerSounds)(
 	float speed);
 typedef void(__thiscall* originalCAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop)(CPhysical* entity);
 typedef void(__thiscall* originalCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop)();
+typedef CAESound*(__thiscall* originalPlaySoundHook)(CAESound* sound);
+typedef void (__thiscall* originalStopSoundAndForget)(CAESound* sound);
+typedef LRESULT(__stdcall* originalMainWndProc)(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 inline auto subhookCAEWeaponAudioEntity__WeaponFire = subhook_t();
 inline auto subhookCAEWeaponAudioEntity__WeaponReload = subhook_t();
 inline auto subhookCAEPedAudioEntity__HandlePedHit = subhook_t();
@@ -131,6 +134,13 @@ inline auto subhookPlayChainsawEvent = subhook_t();
 inline auto subhookCAEWeaponAudioEntity__PlayFlameThrowerSounds = subhook_t();
 inline auto subhookCAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop = subhook_t();
 inline auto subhookCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop = subhook_t();
+inline auto subhookCAESound__StopSoundAndForget = subhook_t();
+inline auto subhookMainWndProc = subhook_t();
+#if 0
+inline auto subhookPlaySoundHook = subhook_t();
+inline void* AESoundManager = (void*)0xB62CB0;
+CAESound* __fastcall HookedPlaySound(void* manager, int, CAESound* sound);
+#endif
 void __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 	CAEExplosionAudioEntity* t,
 	void* unusedpointer,
@@ -239,6 +249,25 @@ void __fastcall CAEWeaponAudioEntity__PlayCameraSound(
 	float audability);
 void __fastcall CPed__RemoveGogglesModel(CPed* ts, int);
 void __fastcall CAESoundManager__CancelSoundsOwnedByAudioEntity(void* ts, int, CAEAudioEntity* entity, uint8_t a3);
+void __fastcall CAESound__StopSirenSound(CAESound* ts, int);
+void __fastcall CAESound__DummyVeh(
+	CAESound* ts, int,
+	__int16 bankSlotId,
+	__int16 sfxId,
+	CAEAudioEntity* audio,
+	float x,
+	float y,
+	float z,
+	float volume,
+	float maxDistance,
+	float speed,
+	float timeScale,
+	char a12,
+	__int16 environmentFlags,
+	float a14,
+	__int16 currPlayPosn);
+LRESULT CALLBACK
+MainWndProcHOOK(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
 // Define them all in a structure for a better readability
 struct Buffers
 {
@@ -261,6 +290,8 @@ struct Buffers
 	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>> collapseBuffers;
 	std::unordered_map<std::string, std::unordered_map<std::string, std::vector<ALuint>>> collapseByShoeTextureBuffers;
 	std::unordered_map<std::string, std::vector<ALuint>> collapsePerSurfaceBuffers;
+	std::unordered_map<std::string, std::vector<ALuint>> gunshellBuffersPerSurface;
+	std::unordered_map<std::string, std::vector<ALuint>> shotgunshellBuffersPerSurface;
 	std::vector<ALuint> fireLoopBuffers;
 	std::vector<ALuint> fireBurstBuffers;
 	std::vector<ALuint> fireLoopBuffersSmall;
@@ -306,6 +337,13 @@ struct Buffers
 	ALuint sprayCanLoopBuffer = 0, fireExtinguisherLoopBuffer = 0;
 	// goggles: on, off
 	ALuint cameraShutterBuffer = 0, gogglesBuffer[2] = { 0 };
+
+	// siren buffers (0 - main loop, 1 - idle loop, 2 - reverse beep, 3 - air brakes)
+	std::unordered_map<int, std::array<ALuint, 4>> sirenBuffers;
+	// flag to mark the model as it has the sound
+	std::unordered_map<int, bool> g_VehicleHasSiren;
+	// for air brakes
+	std::unordered_map<CVehicle*, float> m_fVelocityChangeForAudio;
 };
 
 extern Buffers g_Buffers;
@@ -321,6 +359,10 @@ inline void SafeDeleteBuffer(ALuint& buf) {
 inline void DeleteBufferVector(std::vector<ALuint>& vec) {
 	for (auto& b : vec) SafeDeleteBuffer(b);
 	vec.clear();
+}
+
+inline void DeleteBufferArray(std::array<ALuint, 4>& array) {
+	for (auto& b : array) SafeDeleteBuffer(b);
 }
 
 inline void DeleteBufferMapVec(std::unordered_map<std::string, std::vector<ALuint>>& map) {
@@ -441,6 +483,8 @@ inline void DeleteAllBuffers(Buffers& b) {
 	DeleteBufferMapVec(b.landingPerSurfaceBuffers);
 	DeleteBufferMapNested(b.collapseBuffers);
 	DeleteBufferMapVec(b.collapsePerSurfaceBuffers);
+	DeleteBufferMapVec(b.gunshellBuffersPerSurface);
+	DeleteBufferMapVec(b.shotgunshellBuffersPerSurface);
 
 	DeleteBufferMapNested(b.footstepShoeBuffers);
 	DeleteBufferMapVec(b.footstepSurfaceBuffers);
@@ -491,6 +535,11 @@ inline void DeleteAllBuffers(Buffers& b) {
 	DeleteBufferMapVec(b.ExplosionTypeDistantBuffers);
 	DeleteBufferMapVec(b.ExplosionTypeDebrisBuffers);
 	DeleteBufferMapVec(b.ExplosionTypeUnderwaterBuffers);
+	// remove siren buffers and clear siren flag map
+	for (auto& kv : b.sirenBuffers) {
+		DeleteBufferArray(kv.second);
+		b.g_VehicleHasSiren[kv.first] = false;
+	}
 
 	// cleanup any per-fire / non-fire instances so they don't reference deleted sources/buffers
 	for (auto& kv : g_Buffers.fireSounds) {
@@ -633,6 +682,7 @@ inline auto PlayStop = [&](CPhysical* entity, bool playSound = true, bool clearS
 #define AUDIODISTANT(MODELID) AUDIOPLAY(MODELID, "distant")
 #define AUDIODRYFIRE(MODELID) AUDIOPLAY(MODELID, "dryfire")
 #define AUDIOLOWAMMO(MODELID) AUDIOPLAY(MODELID, "low_ammo")
+#define AUDIOGUNSHELL(MODELID) AUDIOPLAY(MODELID, "gunshell")
 #define AUDIORELOAD(MODELID, RETURNVALUE) AUDIOPLAY(MODELID, "reload", RETURNVALUE)
 #define AUDIORELOAD1(MODELID, RETURNVALUE) AUDIOPLAY(MODELID, "reload_one", RETURNVALUE)
 #define AUDIORELOAD2(MODELID, RETURNVALUE) AUDIOPLAY(MODELID, "reload_two", RETURNVALUE)
@@ -903,6 +953,23 @@ inline int __cdecl GetWeaponHighestParentType(int weaponType)
 {
 	auto Function = reinterpret_cast<int(__cdecl*)(int)>(GetExportedFunction("GetWeaponHighestParentType", "$fastman92limitAdjuster.asi"));
 	return Function(weaponType);
+}
+
+inline bool IsShotgunType(eWeaponType type) {
+	switch (type) {
+	case WEAPONTYPE_SHOTGUN:
+	case WEAPONTYPE_SPAS12:
+	case WEAPONTYPE_SAWNOFF:
+		return true;
+	default:
+		int typeCustom = GetWeaponHighestParentType(type);
+		if (typeCustom == WEAPONTYPE_SHOTGUN || typeCustom == WEAPONTYPE_SPAS12 || typeCustom == WEAPONTYPE_SAWNOFF) {
+			return true;
+		}
+		else {
+			return false;
+		}
+	}
 }
 
 

@@ -29,13 +29,14 @@ const float CAudioManager::barrelFadeDuration = 0.5f;
 
 ALuint CAudioManager::barrelSpinSource = 0;
 float CAudioManager::barrelSpinVolume = 0.0f;
-// 
+ 
 std::unordered_map<CPed*, std::array<std::shared_ptr<SoundInstance>, 5>> CAudioManager::m_apChainsawSounds;
 std::unordered_map<CPed*, std::array<std::shared_ptr<SoundInstance>, 3>> CAudioManager::m_apFlamethrowerSounds;
 std::unordered_map<CPed*, std::shared_ptr<SoundInstance>> CAudioManager::m_apSpraycanSounds;
 std::unordered_map<CPed*, std::shared_ptr<SoundInstance>> CAudioManager::m_apFireextinguisherSounds;
 // array of sounds, 0 - fire, 1 - barrel spin
 std::unordered_map<CPed*, std::array<std::shared_ptr<SoundInstance>, 2>> CAudioManager::m_apMinigunSound;
+std::unordered_map<CVehicle*, std::array<std::shared_ptr<SoundInstance>, 3>> CAudioManager::m_apSirens;
 
 
 std::vector<ManualAmbience> g_ManualAmbiences;
@@ -104,6 +105,9 @@ void CAudioManager::Initialize()
 	Loaders::LoadFireSounds(foldermod);
 	Loaders::LoadAmbienceSounds(foldermod);
 	Loaders::LoadRicochetSounds(foldermod);
+#if 0
+	Loaders::LoadGunshellSounds(foldermod);
+#endif
 	Loaders::LoadFootstepSounds(foldermod);
 	Loaders::LoadTankCannonSounds(foldermod);
 	Loaders::LoadMissileSounds(foldermod);
@@ -114,6 +118,7 @@ void CAudioManager::Initialize()
 	Loaders::LoadSpraycanSound(foldermod);
 	Loaders::LoadExtinguisherSound(foldermod);
 	Loaders::LoadCameraAndGoggleSounds(foldermod);
+	Loaders::LoadCarSirenSounds(foldermod);
 }
 
 void CAudioManager::Shutdown()
@@ -728,7 +733,7 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 		LOG("Using reloading attenuation");
 	}
 	else if (isAfter) {
-		finalAtt = settings.base;
+		finalAtt = settings.after;
 		LOG("Using after attenuation");
 	}
 	else if (NeedsToBeQuieter) {
@@ -1443,6 +1448,22 @@ void CAudioManager::ResumeSource(SoundInstance* audio)
 		alSourcef(audio->source, AL_SEC_OFFSET, audio->pauseOffset);
 		alSourcePlay(audio->source);
 		audio->paused = false;
+	}
+}
+
+void CAudioManager::PauseAllSources()
+{
+	for (auto& audio : audiosplaying) {
+		if (!audio) continue;
+		PauseSource(&*audio);
+	}
+}
+
+void CAudioManager::ResumeAllSources()
+{
+	for (auto& audio : audiosplaying) {
+		if (!audio) continue;
+		ResumeSource(&*audio);
 	}
 }
 

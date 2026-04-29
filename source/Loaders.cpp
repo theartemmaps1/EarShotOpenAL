@@ -99,6 +99,60 @@ void Loaders::LoadChainsawSounds(const fs::path& folder)
 	}
 }
 
+void Loaders::LoadCarSirenSounds(const fs::path& folder)
+{
+	const fs::path sirensDir = folder / "generic/sirens";
+	if (!fs::exists(sirensDir))
+	{
+		LOG("Sirens folder wasn't found, '%s'", sirensDir.string().c_str());
+		return;
+	}
+
+	const char* names[4] = { "mainsirenloop", "idlesirenloop", "reverse_beep", "air_brakes" };
+	int totalLoaded = 0;
+
+	for (const auto& entry : fs::directory_iterator(sirensDir))
+	{
+		if (!fs::is_directory(entry.path()))
+			continue;
+
+		std::string folderName = entry.path().filename().string();
+		int modelId = -1;
+		try {
+			modelId = std::stoi(folderName);
+		}
+		catch (...) {
+			LOG("Invalid model ID folder name: '%s'", folderName.c_str());
+			continue;
+		}
+
+		// Load sounds for this model
+		int loaded = 0;
+		for (int i = 0; i < 4 && loaded < 4; ++i)
+		{
+			for (const auto& ext : extensions)
+			{
+				fs::path path = entry.path() / (names[i] + ext);
+				if (fs::exists(path))
+				{
+					g_Buffers.sirenBuffers[modelId][i] = AudioManager.CreateOpenALBufferFromAudioFile(path.string().c_str());
+					g_Buffers.g_VehicleHasSiren[modelId] = true;
+					loaded++;
+					totalLoaded++;
+					break;
+				}
+			}
+		}
+
+		if (loaded > 0)
+		{
+			LOG("Loaded %d siren sounds for model ID %d", loaded, modelId);
+		}
+	}
+
+	LOG("Total siren sounds loaded: %d", totalLoaded);
+}
+
 void Loaders::LoadFlamethrowerSounds(const fs::path& folder)
 {
 	const char* names[3] = { "flamethrower_idlegasloop", "flamethrower_start", "flamethrower_fire" };
@@ -288,6 +342,37 @@ void Loaders::InitializeIniFile(int stage, bool loadAll)
 		distanceForDistantExplosion = ini.ReadFloat("MAIN", "Distant explosion distance", 100.0f);
 		stereoAmbienceVol = ini.ReadFloat("MAIN", "Stereo ambience volume", 0.3f);
 	}
+
+	auto LoadVehicleModelSound = [&](int modelId)
+		{
+			const std::string section = "VEHICLE_" + std::to_string(modelId);
+
+			auto loadAtt = [&](const char* key, Attenuation& att,
+				float defMax, float defRef, float defRolloff, float defAir)
+				{
+					att.maxDist = ini.ReadFloat(section, std::string(key) + ".maxDist", defMax);
+					att.refDist = ini.ReadFloat(section, std::string(key) + ".refDist", defRef);
+					att.rolloffFactor = ini.ReadFloat(section, std::string(key) + ".rolloffFactor", defRolloff);
+					att.airAbsorption = ini.ReadFloat(section, std::string(key) + ".airAbsorption", defAir);
+				};
+
+			auto loadPitch = [&](const char* key, std::unordered_map<int, std::optional<float>>& map, float defPitch)
+				{
+					map[modelId] = ini.ReadFloat(section, std::string(key) + ".pitch", defPitch);
+				};
+
+			loadAtt("siren", gAttenuationSettings.siren[modelId], FLT_MAX, 1.0f, 0.5f, 1.0f);
+			loadAtt("sirenidle", gAttenuationSettings.sirenidle[modelId], FLT_MAX, 1.0f, 0.5f, 1.0f);
+			loadAtt("reverse_beep", gAttenuationSettings.reverse_beep[modelId], FLT_MAX, 1.0f, 1.0f, 1.5f);
+			loadAtt("air_brakes", gAttenuationSettings.air_brake[modelId], FLT_MAX, 1.0f, 1.0f, 1.5f);
+
+			loadPitch("siren", gPitches.siren, 1.0f);
+			loadPitch("sirenidle", gPitches.sirenidle, 1.0f);
+			loadPitch("reverse_beep", gPitches.reverse_beep, 1.0f);
+			loadPitch("air_brakes", gPitches.air_brake, 1.0f);
+			LOG("Loaded for model %d", modelId);
+		};
+
 	auto readOpt = [&](std::string kname, std::string section) -> std::optional<float> {
 		constexpr float sentinel = std::numeric_limits<float>::quiet_NaN();
 		float v = ini.ReadFloat(section, kname, sentinel);
@@ -307,11 +392,13 @@ void Loaders::InitializeIniFile(int stage, bool loadAll)
 				att.refDist = ini.ReadFloat(section, ref, defaultRef);
 				att.rolloffFactor = ini.ReadFloat(section, roll, defaultRolloff);
 				att.airAbsorption = ini.ReadFloat(section, air, defaultAirAbs);
-				LOG("Loaded attenuation for section '%s', keyPrefix '%s': maxDist=%.1f, refDist=%.1f, rolloffFactor=%.2f, airAbsorption=%.2f",
-					section.c_str(), keyPrefix.c_str(),
-					att.maxDist, att.refDist, att.rolloffFactor, att.airAbsorption);
 			};
-
+		for (auto& data : g_Buffers.g_VehicleHasSiren) {
+			if (data.second) 
+			{
+				LoadVehicleModelSound(data.first);
+			}
+		}
 		// Tank cannon
 		LoadAttenuation("TANKCANNON", "", gAttenuationSettings.tankcannon, 125.0f, 3.5f, 0.3f, 0.3f);
 		if (auto v = readOpt("tankcannon.pitch", "TANKCANNON")) gPitches.tankcannon = v;
@@ -371,20 +458,6 @@ void Loaders::InitializeIniFile(int stage, bool loadAll)
 			if (auto v = readOpt("explosion.debris.pitch", section)) gPitches.debris[i] = v;
 
 			if (auto v = readOpt("explosion.underwater.pitch", section)) gPitches.underwater[i] = v;
-
-			LOG("Explosion type %d settings: main[maxDist=%.1f, refDist=%.1f, rolloff=%.2f, airAbs=%.2f], \n"
-				"distant[maxDist=%.1f, refDist=%.1f, rolloff=%.2f, airAbs=%.2f], \n"
-				"debris[maxDist=%.1f, refDist=%.1f, rolloff=%.2f, airAbs=%.2f], \n"
-				"underwater[maxDist=%.1f, refDist=%.1f, rolloff=%.2f, airAbs=%.2f]\n",
-				i,
-				gAttenuationSettings.explosion[i].maxDist, gAttenuationSettings.explosion[i].refDist,
-				gAttenuationSettings.explosion[i].rolloffFactor, gAttenuationSettings.explosion[i].airAbsorption,
-				gAttenuationSettings.distexplosion[i].maxDist, gAttenuationSettings.distexplosion[i].refDist,
-				gAttenuationSettings.distexplosion[i].rolloffFactor, gAttenuationSettings.distexplosion[i].airAbsorption,
-				gAttenuationSettings.debris[i].maxDist, gAttenuationSettings.debris[i].refDist,
-				gAttenuationSettings.debris[i].rolloffFactor, gAttenuationSettings.debris[i].airAbsorption,
-				gAttenuationSettings.underwater[i].maxDist, gAttenuationSettings.underwater[i].refDist,
-				gAttenuationSettings.underwater[i].rolloffFactor, gAttenuationSettings.underwater[i].airAbsorption);
 		}
 
 		// Ricochet surfaces
@@ -886,8 +959,11 @@ void Loaders::InstallHooks()
 	subhookCAEWeaponAudioEntity__PlayFlameThrowerSounds = subhook_new((void*)(originalCAEWeaponAudioEntity__PlayFlameThrowerSounds)0x504470, CAEWeaponAudioEntity__PlayFlameThrowerSounds, subhook_flags_t(0));
 	subhookCAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop = subhook_new((void*)(originalCAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop)0x503870, CAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop, subhook_flags_t(0));
 	subhookCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop = subhook_new((void*)(originalCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop)0x5034E0, CAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop, subhook_flags_t(0));
-
-
+	subhookCAESound__StopSoundAndForget = subhook_new((void*)(originalStopSoundAndForget)0x4EF850, CAESound__StopSirenSound, subhook_flags_t(0));
+	subhookMainWndProc = subhook_new((void*)(originalMainWndProc)0x747EB0, MainWndProcHOOK, subhook_flags_t(0));
+#if 0
+	subhookPlaySoundHook = subhook_new((void*)(originalPlaySoundHook)0x4EFB10, HookedPlaySound, subhook_flags_t(0));
+#endif
 	subhook_install(subhookCAEWeaponAudioEntity__WeaponFire);
 	subhook_install(subhookCAEWeaponAudioEntity__WeaponReload);
 	subhook_install(subhookCAEPedAudioEntity__HandlePedHit);
@@ -903,6 +979,11 @@ void Loaders::InstallHooks()
 	subhook_install(subhookCAEWeaponAudioEntity__PlayFlameThrowerSounds);
 	subhook_install(subhookCAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop);
 	subhook_install(subhookCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop);
+	subhook_install(subhookCAESound__StopSoundAndForget);
+	subhook_install(subhookMainWndProc);
+#if 0
+	subhook_install(subhookPlaySoundHook);
+#endif
 
 	//patch::RedirectCall({ 0x504D11, 0x504CD2 }, PlayMinigunBarrelStopSound);
 	patch::RedirectCall(0x72BB37, HookedCAEWeatherAudioEntity__AddAudioEvent);
@@ -917,6 +998,9 @@ void Loaders::InstallHooks()
 						  0x504153, 0x5041DF, 0x504277,
 						  0x5043B5, 0x50443E, 0x503AE0, 0x503A36, 
 						  0x504B3E }, CAESound__Dummy);
+
+	patch::RedirectCall({ 0x4F9E2E, 0x4F9D61 }, CAESound__DummyVeh);
+	//patch::RedirectCall({ 0x4F9E79, 0x4F9DA4 }, CAESound__StopSirenSound);
 	//patch::RedirectCall({ 0x4F9C23, 0x4F9AD0, 0x4F9E2E, 0x4F9D1A, 0x4F9D6 }, CAESound__DummyVeh);
 	patch::RedirectCall(0x50493D, CAEWeaponAudioEntity__PlayGunSounds);
 	patch::RedirectCall({ 0x504CEC, 0x504D22 }, StopMinigunSounds);
@@ -1016,7 +1100,7 @@ void Loaders::RegisterAllWeapons()
 							// map prefix to the correct Attenuation reference in aset
 							if (prefix == "shoot") aset.base.maxDist = *v;
 							else if (prefix == "reload") aset.reload.maxDist = *v;
-							else if (prefix == "after") aset.reload.maxDist = *v;
+							else if (prefix == "after") aset.after.maxDist = *v;
 							else if (prefix == "low_ammo") aset.low_ammo.maxDist = *v;
 							else if (prefix == "distant") aset.distant.maxDist = *v;
 							else if (prefix == "vehicle") aset.vehicle.maxDist = *v;
@@ -1036,7 +1120,7 @@ void Loaders::RegisterAllWeapons()
 						if (auto v = readOptFromLine(line, makeKey(prefix, "refDist"))) {
 							if (prefix == "shoot") aset.base.refDist = *v;
 							else if (prefix == "reload") aset.reload.refDist = *v;
-							else if (prefix == "after") aset.reload.maxDist = *v;
+							else if (prefix == "after") aset.after.refDist = *v;
 							else if (prefix == "low_ammo") aset.low_ammo.refDist = *v;
 							else if (prefix == "distant") aset.distant.refDist = *v;
 							else if (prefix == "vehicle") aset.vehicle.refDist = *v;
@@ -1056,7 +1140,7 @@ void Loaders::RegisterAllWeapons()
 						if (auto v = readOptFromLine(line, makeKey(prefix, "rolloffFactor"))) {
 							if (prefix == "shoot") aset.base.rolloffFactor = *v;
 							else if (prefix == "reload") aset.reload.rolloffFactor = *v;
-							else if (prefix == "after") aset.reload.maxDist = *v;
+							else if (prefix == "after") aset.after.rolloffFactor = *v;
 							else if (prefix == "low_ammo") aset.low_ammo.rolloffFactor = *v;
 							else if (prefix == "distant") aset.distant.rolloffFactor = *v;
 							else if (prefix == "vehicle") aset.vehicle.rolloffFactor = *v;
@@ -1076,7 +1160,7 @@ void Loaders::RegisterAllWeapons()
 						if (auto v = readOptFromLine(line, makeKey(prefix, "airAbsorption"))) {
 							if (prefix == "shoot") aset.base.airAbsorption = *v;
 							else if (prefix == "reload") aset.reload.airAbsorption = *v;
-							else if (prefix == "after") aset.reload.maxDist = *v;
+							else if (prefix == "after") aset.after.airAbsorption = *v;
 							else if (prefix == "low_ammo") aset.low_ammo.airAbsorption = *v;
 							else if (prefix == "distant") aset.distant.airAbsorption = *v;
 							else if (prefix == "vehicle") aset.vehicle.airAbsorption = *v;
@@ -1208,6 +1292,9 @@ void Loaders::ReloadAudioFolders()
 	LoadAmbienceSounds(foldermod);
 	LoadRicochetSounds(foldermod);
 	LoadFootstepSounds(foldermod);
+#if 0
+	LoadGunshellSounds(foldermod);
+#endif
 	LoadTankCannonSounds(foldermod);
 	LoadMissileSounds(foldermod);
 	LoadBulletWhizzSounds(foldermod);
@@ -1216,6 +1303,7 @@ void Loaders::ReloadAudioFolders()
 	LoadFlamethrowerSounds(foldermod);
 	LoadSpraycanSound(foldermod);
 	LoadExtinguisherSound(foldermod);
+	LoadCarSirenSounds(foldermod);
 }
 
 void Loaders::LoadMissileSounds(const fs::path& folder) {
@@ -1309,6 +1397,45 @@ void Loaders::LoadRicochetSounds(const fs::path& folder) {
 		}
 	}
 }
+#if 0
+void Loaders::LoadGunshellSounds(const fs::path& folder)
+{
+	const std::vector<std::string> surfaces = {
+		"default", "metal", "wood", "water", "dirt", "glass", "stone", "sand"
+	};
+	for (const auto& surface : surfaces) {
+		// Regular shells
+		auto loadSurface = [&](std::vector<ALuint>& buffers, const std::string& prefix) {
+			int index = 0;
+			while (true) {
+				fs::path foundFile;
+				for (const auto& ext : extensions) {
+					fs::path candidate = folder / ("generic/gunshells/" + prefix + surface + std::to_string(index) + ext);
+					if (fs::exists(candidate)) { foundFile = candidate; break; }
+				}
+				if (foundFile.empty()) break;
+				ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
+				if (buffer != 0) buffers.push_back(buffer);
+				++index;
+			}
+			if (buffers.empty()) {
+				for (const auto& ext : extensions) {
+					fs::path candidate = folder / ("generic/gunshells/" + prefix + surface + ext);
+					if (fs::exists(candidate)) {
+						ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(candidate.string().c_str());
+						if (buffer != 0) buffers.push_back(buffer);
+						break;
+					}
+				}
+			}
+			LOG("Loaded %d %s sound(s) for surface: %s", (int)buffers.size(), prefix.c_str(), surface.c_str());
+			};
+
+		loadSurface(g_Buffers.gunshellBuffersPerSurface[surface], "gunshell_");
+		loadSurface(g_Buffers.shotgunshellBuffersPerSurface[surface], "shotgunshell_");
+	}
+}
+#endif
 
 void Loaders::LoadFootstepSounds(const fs::path& baseFolder) {
 	const fs::path footstepsDir = baseFolder / "generic/footsteps";
@@ -1694,17 +1821,26 @@ void Loaders::LoadExplosionRelatedSounds(const fs::path& folder) {
 			try { typeID = std::stoi(name); }
 			catch (...) { continue; }
 
-			auto& mainVec = g_Buffers.ExplosionTypeExplosionBuffers[typeID];
-			loadBuffers(entry.path(), mainVec, "explosion");
-
-			auto& debrisVec = g_Buffers.ExplosionTypeDebrisBuffers[typeID];
-			loadBuffers(entry.path(), debrisVec, "debris");
-
-			auto& distantVec = g_Buffers.ExplosionTypeDistantBuffers[typeID];
-			loadBuffers(entry.path(), distantVec, "distant");
-
-			auto& underwaterVec = g_Buffers.ExplosionTypeUnderwaterBuffers[typeID];
-			loadBuffers(entry.path(), underwaterVec, "underwater");
+			{
+				std::vector<ALuint> vec;
+				loadBuffers(entry.path(), vec, "explosion");
+				if (!vec.empty()) g_Buffers.ExplosionTypeExplosionBuffers[typeID] = std::move(vec);
+			}
+			{
+				std::vector<ALuint> vec;
+				loadBuffers(entry.path(), vec, "debris");
+				if (!vec.empty()) g_Buffers.ExplosionTypeDebrisBuffers[typeID] = std::move(vec);
+			}
+			{
+				std::vector<ALuint> vec;
+				loadBuffers(entry.path(), vec, "distant");
+				if (!vec.empty()) g_Buffers.ExplosionTypeDistantBuffers[typeID] = std::move(vec);
+			}
+			{
+				std::vector<ALuint> vec;
+				loadBuffers(entry.path(), vec, "underwater");
+				if (!vec.empty()) g_Buffers.ExplosionTypeUnderwaterBuffers[typeID] = std::move(vec);
+			}
 
 			LOG("Loaded explosionType '%d' sounds from %s", typeID, entry.path().string().c_str());
 		}

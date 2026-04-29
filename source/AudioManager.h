@@ -58,6 +58,11 @@ struct Pitch {
 	std::optional<float> explosion[MAX_EXPLOSIONTYPES], distexplosion[MAX_EXPLOSIONTYPES], debris[MAX_EXPLOSIONTYPES], underwater[MAX_EXPLOSIONTYPES];
 
 	std::optional<float> ricochet[TOTAL_NUM_SURFACE_TYPES];
+
+	std::unordered_map<int, std::optional<float>> siren;
+	std::unordered_map<int, std::optional<float>> sirenidle;
+	std::unordered_map<int, std::optional<float>> reverse_beep;
+	std::unordered_map<int, std::optional<float>> air_brake;
 };
 inline std::unordered_map<std::string, Pitch> gWeaponPitches;
 inline Pitch gPitches;
@@ -73,6 +78,7 @@ struct AttenuationSet {
 	// weapon related
 	Attenuation base;
 	Attenuation reload;
+	Attenuation after;
 	Attenuation low_ammo;
 	Attenuation distant;
 	Attenuation vehicle;
@@ -99,6 +105,7 @@ struct AttenuationSet {
 	Attenuation collapseNPC;
 	Attenuation jacked;
 	Attenuation fire, nonfire;
+	std::unordered_map<int, Attenuation> siren, sirenidle, reverse_beep, air_brake;
 
 	// explosions
 	Attenuation explosion[MAX_EXPLOSIONTYPES], distexplosion[MAX_EXPLOSIONTYPES], debris[MAX_EXPLOSIONTYPES], underwater[MAX_EXPLOSIONTYPES];
@@ -116,6 +123,11 @@ struct AttenuationSet {
 		reload.refDist = 2.3f;
 		reload.rolloffFactor = 6.0f;
 		reload.airAbsorption = 2.0f;
+
+		after.maxDist = FLT_MAX;
+		after.refDist = 2.3f;
+		after.rolloffFactor = 6.0f;
+		after.airAbsorption = 2.0f;
 
 		vehicle.maxDist = 125.0f;
 		vehicle.airAbsorption = 1.5f;
@@ -286,6 +298,7 @@ struct AttenuationSet {
 		footstepsNPCWalk.refDist = 0.2f;
 		footstepsNPCWalk.rolloffFactor = 2.5f;
 		footstepsNPCWalk.airAbsorption = 3.0f;
+
 	}
 };
 
@@ -335,6 +348,7 @@ struct SoundInstance
 	bool isGunfireAmbience = false;
 	bool isManualAmbience = false;
 	bool isChainsawSound = false;
+	bool isSirenSound = false;
 	eWeaponType WeaponType;
 	CPed* shooter = nullptr;
 	float baseGain = 1.0f;
@@ -380,6 +394,7 @@ struct SoundInstanceSettings {
 	bool isAmbience = false;
 	bool isGunfire = false;
 	bool isChainsawSound = false;
+	bool isSirenSound = false;
 
 	CFire* firePtr = nullptr;
 	int fireEventID = 0;
@@ -462,6 +477,8 @@ public:
 	static std::unordered_map<CPed*, std::shared_ptr<SoundInstance>> m_apFireextinguisherSounds;
 	// array of sounds, 0 - fire, 1 - barrel spin
 	static std::unordered_map<CPed*, std::array<std::shared_ptr<SoundInstance>, 2>> m_apMinigunSound;
+	// array of sounds, 0 - main siren loop, 1 - idle siren loop, 2 - reverse beep
+	static std::unordered_map<CVehicle*, std::array<std::shared_ptr<SoundInstance>, 3>> m_apSirens;
 	void Initialize();
 	void Shutdown();
 	// Initialize reverb...
@@ -478,6 +495,8 @@ public:
 	bool PlaySource2D(ALuint buff, bool relative, float volume, float pitch);
 	void PauseSource(SoundInstance* inst);
 	void ResumeSource(SoundInstance* inst);
+	void PauseAllSources();
+	void ResumeAllSources();
 	bool StartLoopingAmbience(ManualAmbience& ma);
 	void StopLoopingAmbience(ManualAmbience& ma);
 	void UnloadManualAmbiences();

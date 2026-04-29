@@ -13,9 +13,13 @@ public:
 	static void LoadExtinguisherSound(const fs::path& folder);
 	static void LoadRicochetSounds(const fs::path& folder);
 	static void LoadFootstepSounds(const fs::path& baseFolder);
+#if 0
+	static void LoadGunshellSounds(const fs::path& baseFolder);
+#endif
 	static void LoadExplosionRelatedSounds(const fs::path& folder);
 	static void LoadFireSounds(const fs::path& folder);
 	static void LoadJackingRelatedSounds(const fs::path& folder);
+	static void LoadCarSirenSounds(const fs::path& folder);
 	static void InstallHooks();
 	static void RegisterAllWeapons();
 	static void LoadAmbienceSounds(const std::filesystem::path& path, bool loadOldAmbience = true);
@@ -117,7 +121,7 @@ inline std::optional<fs::path> findEarshotForEntity(CEntity* audioentity, const 
 	if (!audioentity) return std::nullopt;
 
 	for (const auto& info : weaponNames) {
-		if (static_cast<int>(info.modelId) == audioentity->m_nModelIndex) {
+		if (info.modelId == audioentity->m_nModelIndex) {
 			fs::path earshotPath = audiopath.parent_path() / info.vehicleWeapName;
 			earshotPath.replace_extension(modextension);
 			if (fs::exists(earshotPath)) return earshotPath;
