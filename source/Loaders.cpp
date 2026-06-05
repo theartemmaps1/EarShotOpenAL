@@ -102,55 +102,179 @@ void Loaders::LoadChainsawSounds(const fs::path& folder)
 void Loaders::LoadCarSirenSounds(const fs::path& folder)
 {
 	const fs::path sirensDir = folder / "generic/sirens";
+	const fs::path sirensIni = sirensDir / "sirens.ini";
+
 	if (!fs::exists(sirensDir))
 	{
 		LOG("Sirens folder wasn't found, '%s'", sirensDir.string().c_str());
 		return;
 	}
 
-	const char* names[4] = { "mainsirenloop", "idlesirenloop", "reverse_beep", "air_brakes" };
-	int totalLoaded = 0;
-
-	for (const auto& entry : fs::directory_iterator(sirensDir))
+	if (!fs::exists(sirensIni))
 	{
-		if (!fs::is_directory(entry.path()))
-			continue;
+		LOG("Sirens ini wasn't found, '%s'", sirensIni.string().c_str());
+		return;
+	}
 
-		std::string folderName = entry.path().filename().string();
-		int modelId = -1;
-		try {
-			modelId = std::stoi(folderName);
-		}
-		catch (...) {
-			LOG("Invalid model ID folder name: '%s'", folderName.c_str());
-			continue;
-		}
+	CIniReader ini(sirensIni.string());
 
-		// Load sounds for this model
-		int loaded = 0;
-		for (int i = 0; i < 4 && loaded < 4; ++i)
+	auto readOpt = [&](const std::string& section, const std::string& key) -> std::optional<float>
+		{
+			constexpr float sentinel = std::numeric_limits<float>::quiet_NaN();
+			float v = ini.ReadFloat(section, key, sentinel);
+			if (std::isnan(v))
+				return std::nullopt;
+			return v;
+		};
+
+	auto loadAtt = [&](const std::string& section, const char* keyPrefix, Attenuation& att,
+		float defMax, float defRef, float defRolloff, float defAir)
+		{
+			att.maxDist = ini.ReadFloat(section, std::string(keyPrefix) + ".maxDist", defMax);
+			att.refDist = ini.ReadFloat(section, std::string(keyPrefix) + ".refDist", defRef);
+			att.rolloffFactor = ini.ReadFloat(section, std::string(keyPrefix) + ".rolloffFactor", defRolloff);
+			att.airAbsorption = ini.ReadFloat(section, std::string(keyPrefix) + ".airAbsorption", defAir);
+		};
+
+	auto loadSoundFile = [&](int modelId, int slot, const fs::path& filePath) -> bool
 		{
 			for (const auto& ext : extensions)
 			{
-				fs::path path = entry.path() / (names[i] + ext);
+				fs::path path = filePath;
+				if (!path.has_extension())
+					path += ext;
+
 				if (fs::exists(path))
 				{
-					g_Buffers.sirenBuffers[modelId][i] = AudioManager.CreateOpenALBufferFromAudioFile(path.string().c_str());
+					g_Buffers.sirenBuffers[modelId][slot] =
+						AudioManager.CreateOpenALBufferFromAudioFile(path.string().c_str());
 					g_Buffers.g_VehicleHasSiren[modelId] = true;
-					loaded++;
-					totalLoaded++;
-					break;
+					return true;
 				}
 			}
-		}
+
+			LOG("Missing sound file for model %d: '%s'", modelId, filePath.string().c_str());
+			return false;
+		};
+
+	std::vector<char> sectionNames(65536);
+	DWORD copied = GetPrivateProfileSectionNamesA(
+		sectionNames.data(),
+		static_cast<DWORD>(sectionNames.size()),
+		sirensIni.string().c_str()
+	);
+
+	if (copied == 0)
+	{
+		LOG("No INI sections found in '%s'", sirensIni.string().c_str());
+		return;
+	}
+
+	int totalLoaded = 0;
+
+	for (const char* sec = sectionNames.data(); *sec; sec += std::strlen(sec) + 1)
+	{
+		int modelId = -1;
+		if (std::sscanf(sec, "VEHICLE_%d", &modelId) != 1)
+			continue;
+
+		std::string section(sec);
+
+		std::string sirenPath = ini.ReadString(section, "siren", "");
+		std::string sirenIdlePath = ini.ReadString(section, "sirenidle", "");
+		std::string reversePath = ini.ReadString(section, "reverse_beep", "");
+		std::string airBrakePath = ini.ReadString(section, "air_brakes", "");
+
+		int loaded = 0;
+
+		if (!sirenPath.empty())
+			loaded += loadSoundFile(modelId, 0, sirensDir / sirenPath) ? 1 : 0;
+		if (!sirenIdlePath.empty())
+			loaded += loadSoundFile(modelId, 1, sirensDir / sirenIdlePath) ? 1 : 0;
+		if (!reversePath.empty())
+			loaded += loadSoundFile(modelId, 2, sirensDir / reversePath) ? 1 : 0;
+		if (!airBrakePath.empty())
+			loaded += loadSoundFile(modelId, 3, sirensDir / airBrakePath) ? 1 : 0;
 
 		if (loaded > 0)
 		{
+			totalLoaded += loaded;
+
+			loadAtt(section, "siren", gAttenuationSettings.siren[modelId], FLT_MAX, 1.0f, 0.5f, 1.0f);
+			loadAtt(section, "sirenidle", gAttenuationSettings.sirenidle[modelId], FLT_MAX, 1.0f, 0.5f, 1.0f);
+			loadAtt(section, "reverse_beep", gAttenuationSettings.reverse_beep[modelId], FLT_MAX, 1.0f, 1.0f, 1.5f);
+			loadAtt(section, "air_brakes", gAttenuationSettings.air_brake[modelId], FLT_MAX, 1.0f, 1.0f, 1.5f);
+
+			if (auto v = readOpt(section, "siren.pitch"))        gPitches.siren[modelId] = v;
+			if (auto v = readOpt(section, "sirenidle.pitch"))    gPitches.sirenidle[modelId] = v;
+			if (auto v = readOpt(section, "reverse_beep.pitch")) gPitches.reverse_beep[modelId] = v;
+			if (auto v = readOpt(section, "air_brakes.pitch"))   gPitches.air_brake[modelId] = v;
+
 			LOG("Loaded %d siren sounds for model ID %d", loaded, modelId);
+		}
+		else
+		{
+			LOG("Section '%s' found, but no valid sounds loaded for model ID %d", section.c_str(), modelId);
 		}
 	}
 
 	LOG("Total siren sounds loaded: %d", totalLoaded);
+}
+void Loaders::LoadGrenadeBounceSounds(const fs::path& folder)
+{
+	const fs::path grenadebounceDir = folder / "generic/grenadebounce";
+	if (!fs::exists(grenadebounceDir))
+	{
+		LOG("Grenade bounce folder wasn't found, '%s'", grenadebounceDir.string().c_str());
+		return;
+	}
+
+	const std::vector<std::string> surfaces = {
+			"default", "metal", "wood", "water", "dirt", "glass", "stone", "sand", "flesh",
+			"pavement", "grass", "tile"
+	};
+
+	for (const auto& surface : surfaces) {
+		std::vector<ALuint>& buffers = g_Buffers.grenadeBounceBufferPerSurface[surface];
+		int idx = 0;
+		while (true) {
+			fs::path foundFile;
+			for (const auto& ext : extensions) {
+				fs::path candidate = grenadebounceDir / (surface + "/grenadebounce" + std::to_string(idx) + ext);
+				if (fs::exists(candidate)) {
+					foundFile = candidate;
+					break;
+				}
+			}
+			if (foundFile.empty()) break;
+			ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
+			if (buffer != 0) {
+				buffers.push_back(buffer);
+				loadedAnyGrenadeBounceSounds = true;
+			}
+			++idx;
+		}
+
+		if (buffers.empty()) {
+			for (const auto& ext : extensions) {
+				fs::path fileNoIndex = grenadebounceDir / (surface + "/grenadebounce" + ext);
+				if (fs::exists(fileNoIndex)) {
+					ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(fileNoIndex.string().c_str());
+					if (buffer != 0) {
+						buffers.push_back(buffer);
+						loadedAnyGrenadeBounceSounds = true;
+						LOG("Loaded grenade bounce sound for surface '%s' (no index): %s",
+							surface.c_str(), fileNoIndex.string().c_str());
+					}
+					break;
+				}
+			}
+		}
+		else {
+			LOG("Loaded %d grenade bounce sound(s) for surface: %s",
+				buffers.size(), surface.c_str());
+		}
+	}
 }
 
 void Loaders::LoadFlamethrowerSounds(const fs::path& folder)
@@ -343,36 +467,6 @@ void Loaders::InitializeIniFile(int stage, bool loadAll)
 		stereoAmbienceVol = ini.ReadFloat("MAIN", "Stereo ambience volume", 0.3f);
 	}
 
-	auto LoadVehicleModelSound = [&](int modelId)
-		{
-			const std::string section = "VEHICLE_" + std::to_string(modelId);
-
-			auto loadAtt = [&](const char* key, Attenuation& att,
-				float defMax, float defRef, float defRolloff, float defAir)
-				{
-					att.maxDist = ini.ReadFloat(section, std::string(key) + ".maxDist", defMax);
-					att.refDist = ini.ReadFloat(section, std::string(key) + ".refDist", defRef);
-					att.rolloffFactor = ini.ReadFloat(section, std::string(key) + ".rolloffFactor", defRolloff);
-					att.airAbsorption = ini.ReadFloat(section, std::string(key) + ".airAbsorption", defAir);
-				};
-
-			auto loadPitch = [&](const char* key, std::unordered_map<int, std::optional<float>>& map, float defPitch)
-				{
-					map[modelId] = ini.ReadFloat(section, std::string(key) + ".pitch", defPitch);
-				};
-
-			loadAtt("siren", gAttenuationSettings.siren[modelId], FLT_MAX, 1.0f, 0.5f, 1.0f);
-			loadAtt("sirenidle", gAttenuationSettings.sirenidle[modelId], FLT_MAX, 1.0f, 0.5f, 1.0f);
-			loadAtt("reverse_beep", gAttenuationSettings.reverse_beep[modelId], FLT_MAX, 1.0f, 1.0f, 1.5f);
-			loadAtt("air_brakes", gAttenuationSettings.air_brake[modelId], FLT_MAX, 1.0f, 1.0f, 1.5f);
-
-			loadPitch("siren", gPitches.siren, 1.0f);
-			loadPitch("sirenidle", gPitches.sirenidle, 1.0f);
-			loadPitch("reverse_beep", gPitches.reverse_beep, 1.0f);
-			loadPitch("air_brakes", gPitches.air_brake, 1.0f);
-			LOG("Loaded for model %d", modelId);
-		};
-
 	auto readOpt = [&](std::string kname, std::string section) -> std::optional<float> {
 		constexpr float sentinel = std::numeric_limits<float>::quiet_NaN();
 		float v = ini.ReadFloat(section, kname, sentinel);
@@ -393,12 +487,6 @@ void Loaders::InitializeIniFile(int stage, bool loadAll)
 				att.rolloffFactor = ini.ReadFloat(section, roll, defaultRolloff);
 				att.airAbsorption = ini.ReadFloat(section, air, defaultAirAbs);
 			};
-		for (auto& data : g_Buffers.g_VehicleHasSiren) {
-			if (data.second) 
-			{
-				LoadVehicleModelSound(data.first);
-			}
-		}
 		// Tank cannon
 		LoadAttenuation("TANKCANNON", "", gAttenuationSettings.tankcannon, 125.0f, 3.5f, 0.3f, 0.3f);
 		if (auto v = readOpt("tankcannon.pitch", "TANKCANNON")) gPitches.tankcannon = v;
@@ -432,9 +520,15 @@ void Loaders::InitializeIniFile(int stage, bool loadAll)
 		LoadAttenuation("JACKED", "", gAttenuationSettings.jacked, FLT_MAX, 3.0f, 1.5f, 0.8f);
 		LoadAttenuation("FIRE", "", gAttenuationSettings.fire, 200.0f, 1.0f, 1.5f, 4.0f);
 		LoadAttenuation("FIRE", "nonfire", gAttenuationSettings.nonfire, 200.0f, 1.0f, 1.5f, 4.0f);
+		LoadAttenuation("GUNSHELLS", "general_gunshell", gAttenuationSettings.gunshell, FLT_MAX, 1.0f, 1.5f, 4.0f);
+		LoadAttenuation("GUNSHELLS", "shotgun_shell", gAttenuationSettings.shotgunshell, FLT_MAX, 1.0f, 1.5f, 3.0f);
+		LoadAttenuation("GRENADE_BOUNCE", "", gAttenuationSettings.grenade_bounce, FLT_MAX, 1.0f, 2.0f, 3.0f);
 		if (auto v = readOpt("jacked.pitch", "JACKED")) gPitches.jacked = v;
 		if (auto v = readOpt("fire.pitch", "FIRE"))   gPitches.fire = v;
 		if (auto v = readOpt("nonfire.pitch", "FIRE"))gPitches.nonfire = v;
+		if (auto v = readOpt("gunshells.pitch", "GUNSHELLS"))gPitches.gunshell = v;
+		if (auto v = readOpt("shotgunshells.pitch", "GUNSHELLS"))gPitches.shotgunshell = v;
+		if (auto v = readOpt("grenadebounce.pitch", "GRENADE_BOUNCE"))gPitches.grenade_bounce = v;
 
 		// Explosions
 		for (int i = 0; i < MAX_EXPLOSIONTYPES; i++) {
@@ -451,7 +545,7 @@ void Loaders::InitializeIniFile(int stage, bool loadAll)
 			LoadAttenuation(section, "explosion.debris", gAttenuationSettings.debris[i], 150.0f, 1.0f, 1.5f, 1.0f);
 			LoadAttenuation(section, "explosion.underwater", gAttenuationSettings.underwater[i], 4000.0f, 15.0f, 0.2f, 3.0f);
 
-			if (auto v = readOpt("explosion.main.pitch", section)) { gPitches.explosion[i] = v; continue; }
+			if (auto v = readOpt("explosion.main.pitch", section)) { gPitches.explosion[i] = v; }
 
 			if (auto v = readOpt("explosion.distant.pitch", section)) gPitches.distexplosion[i] = v;
 
@@ -473,122 +567,6 @@ void Loaders::InitializeIniFile(int stage, bool loadAll)
 			if (auto v = readOpt("pitch", section)) gPitches.ricochet[i] = v;
 			LoadAttenuation(section, "", gAttenuationSettings.ricochet[i], 50.0f, 3.5f, 5.0f, 3.0f);
 		}
-#if 0
-		// Load per-weapon attenuation settings
-		for (const auto& kv : registeredweapons) {
-			const auto& keyPair = kv.first;
-			eWeaponType weapType = keyPair.first;
-			eModelID modelId = keyPair.second;
-
-			int weapInt = static_cast<int>(weapType);
-			int modelInt = static_cast<int>(modelId);
-
-			std::string sectModelWeap;
-			if (modelId > static_cast<eModelID>(MODELUNDEFINED)) {
-				sectModelWeap = std::format("WEAPONSOUND_{}_{}", modelInt, weapInt);
-			}
-			std::string sectModel = (modelId > static_cast<eModelID>(MODELUNDEFINED)) ? ("WEAPONSOUND_" + std::to_string(modelInt)) : std::string();
-			std::string sectWeap = std::format("WEAPONSOUND_{}", weapInt);
-
-			auto existsAny = [&](const std::string& s) -> std::string {
-				if (s.empty()) return std::string();
-				if (ini.SectionExists(s)) return s;
-				std::string up = s;
-				std::transform(up.begin(), up.end(), up.begin(), ::toupper);
-				if (ini.SectionExists(up)) return up;
-				return std::string();
-				};
-
-			std::string foundSection;
-			if (!sectModelWeap.empty()) foundSection = existsAny(sectModelWeap);
-			if (foundSection.empty() && !sectModel.empty()) foundSection = existsAny(sectModel);
-			if (foundSection.empty()) foundSection = existsAny(sectWeap);
-
-			if (foundSection.empty()) {
-				continue;
-			}
-
-			AttenuationSet aset = gAttenuationSettings;
-
-			LoadAttenuation(foundSection, "shoot", gAttenuationSettings.base, gAttenuationSettings.base.maxDist, gAttenuationSettings.base.refDist, gAttenuationSettings.base.rolloffFactor, gAttenuationSettings.base.airAbsorption);
-			LoadAttenuation(foundSection, "reload", gAttenuationSettings.reload, gAttenuationSettings.reload.maxDist, gAttenuationSettings.reload.refDist, gAttenuationSettings.reload.rolloffFactor, gAttenuationSettings.reload.airAbsorption);
-			LoadAttenuation(foundSection, "low_ammo", gAttenuationSettings.low_ammo, gAttenuationSettings.low_ammo.maxDist, gAttenuationSettings.low_ammo.refDist, gAttenuationSettings.low_ammo.rolloffFactor, gAttenuationSettings.low_ammo.airAbsorption);
-			LoadAttenuation(foundSection, "distant", gAttenuationSettings.distant, gAttenuationSettings.distant.maxDist, gAttenuationSettings.distant.refDist, gAttenuationSettings.distant.rolloffFactor, gAttenuationSettings.distant.airAbsorption);
-			LoadAttenuation(foundSection, "vehicle", gAttenuationSettings.vehicle, gAttenuationSettings.vehicle.maxDist, gAttenuationSettings.vehicle.refDist, gAttenuationSettings.vehicle.rolloffFactor, gAttenuationSettings.vehicle.airAbsorption);
-			LoadAttenuation(foundSection, "melee", gAttenuationSettings.quieter, gAttenuationSettings.quieter.maxDist, gAttenuationSettings.quieter.refDist, gAttenuationSettings.quieter.rolloffFactor, gAttenuationSettings.quieter.airAbsorption);
-			LoadAttenuation(foundSection, "minigun.spinLoop", gAttenuationSettings.minigunSpin, gAttenuationSettings.minigunSpin.maxDist, gAttenuationSettings.minigunSpin.refDist, gAttenuationSettings.minigunSpin.rolloffFactor, gAttenuationSettings.minigunSpin.airAbsorption);
-			LoadAttenuation(foundSection, "minigun.spinEnd", gAttenuationSettings.minigunSpinEnd, gAttenuationSettings.minigunSpinEnd.maxDist, gAttenuationSettings.minigunSpinEnd.refDist, gAttenuationSettings.minigunSpinEnd.rolloffFactor, gAttenuationSettings.minigunSpinEnd.airAbsorption);
-			LoadAttenuation(foundSection, "minigun.fireLoop", gAttenuationSettings.minigunShoot, gAttenuationSettings.minigunShoot.maxDist, gAttenuationSettings.minigunShoot.refDist, gAttenuationSettings.minigunShoot.rolloffFactor, gAttenuationSettings.minigunShoot.airAbsorption);
-			LoadAttenuation(foundSection, "fireExtinguisher.sprayLoop", gAttenuationSettings.fireExtinguisher, gAttenuationSettings.fireExtinguisher.maxDist, gAttenuationSettings.fireExtinguisher.refDist, gAttenuationSettings.fireExtinguisher.rolloffFactor, gAttenuationSettings.fireExtinguisher.airAbsorption);
-			LoadAttenuation(foundSection, "sprayCan.sprayLoop", gAttenuationSettings.sprayCan, gAttenuationSettings.sprayCan.maxDist, gAttenuationSettings.sprayCan.refDist, gAttenuationSettings.sprayCan.rolloffFactor, gAttenuationSettings.sprayCan.airAbsorption);
-			LoadAttenuation(foundSection, "chainsaw.idleLoop", gAttenuationSettings.chainsawIdle, gAttenuationSettings.chainsawIdle.maxDist, gAttenuationSettings.chainsawIdle.refDist, gAttenuationSettings.chainsawIdle.rolloffFactor, gAttenuationSettings.chainsawIdle.airAbsorption);
-			LoadAttenuation(foundSection, "chainsaw.activeLoop", gAttenuationSettings.chainsawActive, gAttenuationSettings.chainsawActive.maxDist, gAttenuationSettings.chainsawActive.refDist, gAttenuationSettings.chainsawActive.rolloffFactor, gAttenuationSettings.chainsawActive.airAbsorption);
-			LoadAttenuation(foundSection, "chainsaw.cuttingLoop", gAttenuationSettings.chainsawCutting, gAttenuationSettings.chainsawCutting.maxDist, gAttenuationSettings.chainsawCutting.refDist, gAttenuationSettings.chainsawCutting.rolloffFactor, gAttenuationSettings.chainsawCutting.airAbsorption);
-			LoadAttenuation(foundSection, "chainsaw.stop", gAttenuationSettings.chainsawStop, gAttenuationSettings.chainsawStop.maxDist, gAttenuationSettings.chainsawStop.refDist, gAttenuationSettings.chainsawStop.rolloffFactor, gAttenuationSettings.chainsawStop.airAbsorption);
-			std::string mapKey;
-			if (!existsAny(sectModelWeap).empty()) {
-				mapKey = std::format("WEAPONSOUND_{}_{}", modelInt, weapInt);
-			}
-			else if (!existsAny(sectModel).empty()) {
-				mapKey = std::format("WEAPONSOUND_{}", modelInt);
-			}
-			else {
-				mapKey = std::format("WEAPONSOUND_{}", weapInt);
-			}
-
-			auto readOpt = [&](const std::string& kname) -> std::optional<float> {
-				constexpr float sentinel = std::numeric_limits<float>::quiet_NaN();
-				float v = ini.ReadFloat(foundSection, kname, sentinel);
-				if (std::isnan(v)) return std::nullopt;
-				return v;
-				};
-
-			Pitch pset{};
-			// weapons
-			if (auto v = readOpt("shoot.pitch"))      gPitches.shoot = v;
-			if (auto v = readOpt("reload.pitch"))     gPitches.reload = v;
-			//if (auto v = readOpt("shoot.pitch"))      gPitches.shoot = v;
-			if (auto v = readOpt("after.pitch"))      gPitches.after = v;
-			if (auto v = readOpt("distant.pitch"))    gPitches.distant = v;
-			if (auto v = readOpt("low_ammo.pitch"))   gPitches.low_ammo = v;
-			if (auto v = readOpt("vehicle.pitch"))    gPitches.vehicle = v;
-			if (auto v = readOpt("melee.pitch"))      gPitches.quieter = v;
-
-			// minigun specific
-			if (auto v = readOpt("minigun.spinLoop.pitch"))  gPitches.minigunSpin = v;
-			if (auto v = readOpt("minigun.spinEnd.pitch"))   gPitches.minigunSpinEnd = v;
-			if (auto v = readOpt("minigun.fireLoop.pitch"))  gPitches.minigunShoot = v;
-			if (auto v = readOpt("minigun.spin.pitch"))      gPitches.minigunSpin = v;
-			if (auto v = readOpt("minigun.spinEnd.pitch"))   gPitches.minigunSpinEnd = v;
-			if (auto v = readOpt("minigun.fire.pitch"))      gPitches.minigunShoot = v;
-
-			// flamethrower
-			if (auto v = readOpt("flamethrower.start.pitch"))     gPitches.flamethrowerStart = v;
-			if (auto v = readOpt("flamethrower.fireLoop.pitch"))  gPitches.flamethrowerFireLoop = v;
-			if (auto v = readOpt("flamethrower.gasLoop.pitch"))   gPitches.flamethrowerGasLoop = v;
-			if (auto v = readOpt("flamethrower.startLoop.pitch")) gPitches.flamethrowerStart = v; // alt
-
-			// extinguisher / spraycan
-			if (auto v = readOpt("fireExtinguisher.sprayLoop.pitch")) gPitches.fireExtinguisher = v;
-			if (auto v = readOpt("fireextinguisher.pitch"))           gPitches.fireExtinguisher = v; // alt
-			if (auto v = readOpt("sprayCan.sprayLoop.pitch"))         gPitches.sprayCan = v;
-			if (auto v = readOpt("spraycan.pitch"))                   gPitches.sprayCan = v; // alt
-
-			// chainsaw
-			if (auto v = readOpt("chainsaw.idleLoop.pitch"))   gPitches.chainsawIdle = v;
-			if (auto v = readOpt("chainsaw.activeLoop.pitch")) gPitches.chainsawActive = v;
-			if (auto v = readOpt("chainsaw.cuttingLoop.pitch"))gPitches.chainsawCutting = v;
-			if (auto v = readOpt("chainsaw.stop.pitch"))       gPitches.chainsawStop = v;
-			if (auto v = readOpt("chainsaw.idle.pitch"))       gPitches.chainsawIdle = v;    // alternate names
-			if (auto v = readOpt("chainsaw.active.pitch"))     gPitches.chainsawActive = v;
-			if (auto v = readOpt("chainsaw.cutting.pitch"))    gPitches.chainsawCutting = v;
-			gWeaponAttenuations[mapKey] = aset;
-			gWeaponPitches[mapKey] = pset;
-
-			LOG("Loaded per-weapon attenuation+pitch: section='%s' -> mapKey='%s' (weap=%d model=%d)",
-				foundSection.c_str(), mapKey.c_str(), weapInt, modelInt);
-		}
-#endif
 	}
 }
 
@@ -961,9 +939,7 @@ void Loaders::InstallHooks()
 	subhookCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop = subhook_new((void*)(originalCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop)0x5034E0, CAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop, subhook_flags_t(0));
 	subhookCAESound__StopSoundAndForget = subhook_new((void*)(originalStopSoundAndForget)0x4EF850, CAESound__StopSirenSound, subhook_flags_t(0));
 	subhookMainWndProc = subhook_new((void*)(originalMainWndProc)0x747EB0, MainWndProcHOOK, subhook_flags_t(0));
-#if 0
-	subhookPlaySoundHook = subhook_new((void*)(originalPlaySoundHook)0x4EFB10, HookedPlaySound, subhook_flags_t(0));
-#endif
+	subhookCAudioEngine__ReportCollision = subhook_new((void*)(originalCAudioEngine__ReportCollision)0x506EB0, CAudioEngine__ReportCollision, subhook_flags_t(0));
 	subhook_install(subhookCAEWeaponAudioEntity__WeaponFire);
 	subhook_install(subhookCAEWeaponAudioEntity__WeaponReload);
 	subhook_install(subhookCAEPedAudioEntity__HandlePedHit);
@@ -981,6 +957,7 @@ void Loaders::InstallHooks()
 	subhook_install(subhookCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop);
 	subhook_install(subhookCAESound__StopSoundAndForget);
 	subhook_install(subhookMainWndProc);
+	subhook_install(subhookCAudioEngine__ReportCollision);
 #if 0
 	subhook_install(subhookPlaySoundHook);
 #endif
@@ -1001,6 +978,7 @@ void Loaders::InstallHooks()
 
 	patch::RedirectCall({ 0x4F9E2E, 0x4F9D61 }, CAESound__DummyVeh);
 	//patch::RedirectCall({ 0x4F9E79, 0x4F9DA4 }, CAESound__StopSirenSound);
+	patch::RedirectCall(0x500366, CAEVehicleAudioEntity__PlayHornOrSiren);
 	//patch::RedirectCall({ 0x4F9C23, 0x4F9AD0, 0x4F9E2E, 0x4F9D1A, 0x4F9D6 }, CAESound__DummyVeh);
 	patch::RedirectCall(0x50493D, CAEWeaponAudioEntity__PlayGunSounds);
 	patch::RedirectCall({ 0x504CEC, 0x504D22 }, StopMinigunSounds);
@@ -1015,6 +993,7 @@ void Loaders::InstallHooks()
 	patch::RedirectCall(0x5051ED, CAEWeaponAudioEntity__PlayCameraSound);
 	patch::RedirectCall(0x5E604E, CPed__RemoveGogglesModel);
 	patch::RedirectCall(0x4DCF4B, CAESoundManager__CancelSoundsOwnedByAudioEntity);
+	//patch::RedirectCall({ 0x4DBD5A, 0x4DBC68 }, CAECollisionAudioEntity__PlayOneShotCollisionSound);
 	//patch::RedirectCall(0x4E6A4C, CWeaponAudio__PlayStealthEvent);
 	//patch::RedirectCall({ 0x61F1C9, 0x61F288, 0x61F2C3, 0x61EF0B, 0x61EF49, 0x61F0D8, 0x61F114 }, IKChainManager_c__PointArm);
 	//patch::RedirectCall({ 0x61F128, 0x61EF7A, 0x61EF66 }, CPedIK__RotateTorsoForArm);
@@ -1292,9 +1271,7 @@ void Loaders::ReloadAudioFolders()
 	LoadAmbienceSounds(foldermod);
 	LoadRicochetSounds(foldermod);
 	LoadFootstepSounds(foldermod);
-#if 0
 	LoadGunshellSounds(foldermod);
-#endif
 	LoadTankCannonSounds(foldermod);
 	LoadMissileSounds(foldermod);
 	LoadBulletWhizzSounds(foldermod);
@@ -1304,6 +1281,7 @@ void Loaders::ReloadAudioFolders()
 	LoadSpraycanSound(foldermod);
 	LoadExtinguisherSound(foldermod);
 	LoadCarSirenSounds(foldermod);
+	LoadGrenadeBounceSounds(foldermod);
 }
 
 void Loaders::LoadMissileSounds(const fs::path& folder) {
@@ -1397,45 +1375,83 @@ void Loaders::LoadRicochetSounds(const fs::path& folder) {
 		}
 	}
 }
-#if 0
+
 void Loaders::LoadGunshellSounds(const fs::path& folder)
 {
+	fs::path gunshellsDir = folder / "generic/gunshells";
+	if (!fs::exists(gunshellsDir))
+	{
+		LOG("Gunshells folder wasn't found, '%s'", gunshellsDir.string().c_str());
+		return;
+	}
+
 	const std::vector<std::string> surfaces = {
 		"default", "metal", "wood", "water", "dirt", "glass", "stone", "sand"
 	};
-	for (const auto& surface : surfaces) {
-		// Regular shells
-		auto loadSurface = [&](std::vector<ALuint>& buffers, const std::string& prefix) {
+
+	auto loadSurface = [&](const fs::path& surfaceDir, std::vector<ALuint>& buffers, const std::string& prefix)
+		{
 			int index = 0;
-			while (true) {
+
+			while (true)
+			{
 				fs::path foundFile;
-				for (const auto& ext : extensions) {
-					fs::path candidate = folder / ("generic/gunshells/" + prefix + surface + std::to_string(index) + ext);
-					if (fs::exists(candidate)) { foundFile = candidate; break; }
+
+				for (const auto& ext : extensions)
+				{
+					fs::path candidate = surfaceDir / (prefix + std::to_string(index) + ext);
+					if (fs::exists(candidate))
+					{
+						foundFile = candidate;
+						break;
+					}
 				}
-				if (foundFile.empty()) break;
+
+				if (foundFile.empty())
+					break;
+
 				ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(foundFile.string().c_str());
-				if (buffer != 0) buffers.push_back(buffer);
+				if (buffer != 0)
+					buffers.push_back(buffer);
+
 				++index;
 			}
-			if (buffers.empty()) {
-				for (const auto& ext : extensions) {
-					fs::path candidate = folder / ("generic/gunshells/" + prefix + surface + ext);
-					if (fs::exists(candidate)) {
+
+			if (buffers.empty())
+			{
+				for (const auto& ext : extensions)
+				{
+					fs::path candidate = surfaceDir / (prefix + ext);
+					if (fs::exists(candidate))
+					{
 						ALuint buffer = AudioManager.CreateOpenALBufferFromAudioFile(candidate.string().c_str());
-						if (buffer != 0) buffers.push_back(buffer);
+						if (buffer != 0)
+							buffers.push_back(buffer);
 						break;
 					}
 				}
 			}
-			LOG("Loaded %d %s sound(s) for surface: %s", (int)buffers.size(), prefix.c_str(), surface.c_str());
-			};
 
-		loadSurface(g_Buffers.gunshellBuffersPerSurface[surface], "gunshell_");
-		loadSurface(g_Buffers.shotgunshellBuffersPerSurface[surface], "shotgunshell_");
+			LOG("Loaded %d %s sound(s) from: %s",
+				(int)buffers.size(),
+				prefix.c_str(),
+				surfaceDir.string().c_str());
+		};
+
+	for (const auto& surface : surfaces)
+	{
+		fs::path surfaceDir = gunshellsDir / surface;
+
+		if (!fs::exists(surfaceDir) || !fs::is_directory(surfaceDir))
+		{
+			LOG("Surface folder wasn't found, '%s'", surfaceDir.string().c_str());
+			continue;
+		}
+
+		loadSurface(surfaceDir, g_Buffers.gunshellBuffersPerSurface[surface], "gunshell");
+		loadSurface(surfaceDir, g_Buffers.shotgunshellBuffersPerSurface[surface], "shotgunshell");
 	}
 }
-#endif
 
 void Loaders::LoadFootstepSounds(const fs::path& baseFolder) {
 	const fs::path footstepsDir = baseFolder / "generic/footsteps";

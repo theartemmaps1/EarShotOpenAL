@@ -63,6 +63,8 @@ struct Pitch {
 	std::unordered_map<int, std::optional<float>> sirenidle;
 	std::unordered_map<int, std::optional<float>> reverse_beep;
 	std::unordered_map<int, std::optional<float>> air_brake;
+	std::optional<float> gunshell, shotgunshell;
+	std::optional<float> grenade_bounce;
 };
 inline std::unordered_map<std::string, Pitch> gWeaponPitches;
 inline Pitch gPitches;
@@ -105,6 +107,8 @@ struct AttenuationSet {
 	Attenuation collapseNPC;
 	Attenuation jacked;
 	Attenuation fire, nonfire;
+	Attenuation gunshell, shotgunshell;
+	Attenuation grenade_bounce;
 	std::unordered_map<int, Attenuation> siren, sirenidle, reverse_beep, air_brake;
 
 	// explosions
@@ -409,6 +413,12 @@ struct SoundInstanceSettings {
 	std::optional<std::string> name;
 };
 
+struct DelayedSoundEntry {
+	ALuint buffer = 0;
+	SoundInstanceSettings opts;
+	uint32_t playAtTime = 0;
+};
+
 struct ManualAmbience {
 	CVector pos;
 	float range;
@@ -479,6 +489,10 @@ public:
 	static std::unordered_map<CPed*, std::array<std::shared_ptr<SoundInstance>, 2>> m_apMinigunSound;
 	// array of sounds, 0 - main siren loop, 1 - idle siren loop, 2 - reverse beep
 	static std::unordered_map<CVehicle*, std::array<std::shared_ptr<SoundInstance>, 3>> m_apSirens;
+	static std::vector<DelayedSoundEntry> scheduledSounds;
+
+	void ScheduleDelayedSound(ALuint buffer, const SoundInstanceSettings& opts, float delaySeconds);
+	void ProcessScheduledSounds();
 	void Initialize();
 	void Shutdown();
 	// Initialize reverb...
@@ -497,6 +511,7 @@ public:
 	void ResumeSource(SoundInstance* inst);
 	void PauseAllSources();
 	void ResumeAllSources();
+	void PlayGunshellSound(int type, eSurfaceType surface, const CVector& pos);
 	bool StartLoopingAmbience(ManualAmbience& ma);
 	void StopLoopingAmbience(ManualAmbience& ma);
 	void UnloadManualAmbiences();

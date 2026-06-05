@@ -14,7 +14,7 @@ project "EarShotOpenAL"
 	linkoptions "/SAFESEH:NO"
 	buildoptions { "-std:c++latest", "/permissive"}
 	warnings "Off"
-	defines { "_CRT_SECURE_NO_WARNINGS", "_CRT_NON_CONFORMING_SWPRINTFS", "_USE_MATH_DEFINES", "RW" }
+	defines { "_CRT_SECURE_NO_WARNINGS", "_CRT_NON_CONFORMING_SWPRINTFS", "_USE_MATH_DEFINES", "RW", "DR_WAV_IMPLEMENTATION", "DR_FLAC_IMPLEMENTATION", "DR_MP3_IMPLEMENTATION" }
 	
 	files {
 		"source/**.*",
@@ -23,6 +23,7 @@ project "EarShotOpenAL"
     "source/include/subhook-0.8.2/subhook_x86.c",
 	"source/include/subhook-0.8.2/subhook_unix.c",
 	"source/include/subhook-0.8.2/subhook_windows.c",
+	"source/vendor/stb_vorbis/stb_vorbis.c",
     "source/**/tests/**.c",
 	"source/**/tests/**.cpp",
 	"source/**/tests/**.asm"
@@ -63,7 +64,7 @@ project "EarShotOpenAL"
 		symbols "on"
 		optimize "On"
 		staticruntime "on"
-		flags { "StaticRuntime" }
+	--	flags { "StaticRuntime" }
 		debugdir "$(GTA_SA_DIR)"
 		debugcommand "$(GTA_SA_DIR)/gta_sa.exe"
 	--	postbuildcommands {

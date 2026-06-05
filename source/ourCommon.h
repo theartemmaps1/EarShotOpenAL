@@ -117,6 +117,9 @@ typedef void(__thiscall* originalCAEWeaponAudioEntity__StopFlameThrowerIdleGasLo
 typedef CAESound*(__thiscall* originalPlaySoundHook)(CAESound* sound);
 typedef void (__thiscall* originalStopSoundAndForget)(CAESound* sound);
 typedef LRESULT(__stdcall* originalMainWndProc)(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+typedef uint8_t(__thiscall* originalSpecialEntityCalcCollisionSteps)(bool& bProcessCollisionBeforeSettingTimeStep, bool& unk2);
+typedef int(__thiscall* originalRequestNewSound)(CAESound* sound);
+typedef void(__thiscall* originalCAudioEngine__ReportCollision)(CEntity* entity1, CEntity* entity2, eSurfaceType surf1, eSurfaceType surf2, CVector& point, CVector* normal, float fCollisionImpact1, float fCollisionImpact2, bool playOnlyOneShotCollisionSound, bool unknown);
 inline auto subhookCAEWeaponAudioEntity__WeaponFire = subhook_t();
 inline auto subhookCAEWeaponAudioEntity__WeaponReload = subhook_t();
 inline auto subhookCAEPedAudioEntity__HandlePedHit = subhook_t();
@@ -136,11 +139,7 @@ inline auto subhookCAEWeaponAudioEntity__PlayFlameThrowerIdleGasLoop = subhook_t
 inline auto subhookCAEWeaponAudioEntity__StopFlameThrowerIdleGasLoop = subhook_t();
 inline auto subhookCAESound__StopSoundAndForget = subhook_t();
 inline auto subhookMainWndProc = subhook_t();
-#if 0
-inline auto subhookPlaySoundHook = subhook_t();
-inline void* AESoundManager = (void*)0xB62CB0;
-CAESound* __fastcall HookedPlaySound(void* manager, int, CAESound* sound);
-#endif
+inline auto subhookCAudioEngine__ReportCollision = subhook_t();
 void __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 	CAEExplosionAudioEntity* t,
 	void* unusedpointer,
@@ -266,8 +265,15 @@ void __fastcall CAESound__DummyVeh(
 	__int16 environmentFlags,
 	float a14,
 	__int16 currPlayPosn);
+char __fastcall CAEVehicleAudioEntity__PlayHornOrSiren(
+	CAEVehicleAudioEntity* ts, int,
+	char counter,
+	char sirenOrAlarm,
+	char mrWhoopie,
+	cVehicleParams* data);
 LRESULT CALLBACK
 MainWndProcHOOK(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+void __fastcall CAudioEngine__ReportCollision(CAudioEngine* eng, int, CEntity* entity1, CEntity* entity2, eSurfaceType surf1, eSurfaceType surf2, CVector& point, CVector* normal, float fCollisionImpact1, float fCollisionImpact2, bool playOnlyOneShotCollisionSound, bool unknown);
 // Define them all in a structure for a better readability
 struct Buffers
 {
@@ -337,6 +343,7 @@ struct Buffers
 	ALuint sprayCanLoopBuffer = 0, fireExtinguisherLoopBuffer = 0;
 	// goggles: on, off
 	ALuint cameraShutterBuffer = 0, gogglesBuffer[2] = { 0 };
+	std::unordered_map<std::string, std::vector<ALuint>> grenadeBounceBufferPerSurface;
 
 	// siren buffers (0 - main loop, 1 - idle loop, 2 - reverse beep, 3 - air brakes)
 	std::unordered_map<int, std::array<ALuint, 4>> sirenBuffers;

@@ -13,9 +13,7 @@ public:
 	static void LoadExtinguisherSound(const fs::path& folder);
 	static void LoadRicochetSounds(const fs::path& folder);
 	static void LoadFootstepSounds(const fs::path& baseFolder);
-#if 0
 	static void LoadGunshellSounds(const fs::path& baseFolder);
-#endif
 	static void LoadExplosionRelatedSounds(const fs::path& folder);
 	static void LoadFireSounds(const fs::path& folder);
 	static void LoadJackingRelatedSounds(const fs::path& folder);
@@ -27,9 +25,12 @@ public:
 	static void LoadTankCannonSounds(const fs::path& folder);
 	static void LoadBulletWhizzSounds(const fs::path& folder);
 	static void LoadCameraAndGoggleSounds(const fs::path& folder);
+	static void LoadGrenadeBounceSounds(const fs::path& folder);
 	static void InitializeIniFile(int stage, bool loadAll = false);
 	static void ReloadAudioFolders();
 };
+
+inline bool loadedAnyGrenadeBounceSounds = false;
 
 struct WeapInfos
 {

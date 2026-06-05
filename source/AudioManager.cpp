@@ -26,6 +26,8 @@ bool CAudioManager::efxSupported = false;
 std::vector<std::shared_ptr<SoundInstance>> CAudioManager::audiosplaying;
 map<fs::path, ALuint> CAudioManager::gBufferMap;
 const float CAudioManager::barrelFadeDuration = 0.5f;
+// With the other static definitions at the top
+std::vector<DelayedSoundEntry> CAudioManager::scheduledSounds;
 
 ALuint CAudioManager::barrelSpinSource = 0;
 float CAudioManager::barrelSpinVolume = 0.0f;
@@ -105,9 +107,7 @@ void CAudioManager::Initialize()
 	Loaders::LoadFireSounds(foldermod);
 	Loaders::LoadAmbienceSounds(foldermod);
 	Loaders::LoadRicochetSounds(foldermod);
-#if 0
 	Loaders::LoadGunshellSounds(foldermod);
-#endif
 	Loaders::LoadFootstepSounds(foldermod);
 	Loaders::LoadTankCannonSounds(foldermod);
 	Loaders::LoadMissileSounds(foldermod);
@@ -119,6 +119,7 @@ void CAudioManager::Initialize()
 	Loaders::LoadExtinguisherSound(foldermod);
 	Loaders::LoadCameraAndGoggleSounds(foldermod);
 	Loaders::LoadCarSirenSounds(foldermod);
+	Loaders::LoadGrenadeBounceSounds(foldermod);
 }
 
 void CAudioManager::Shutdown()
@@ -214,6 +215,31 @@ void CAudioManager::Shutdown()
 	pContext = nullptr;
 	LOG("OpenAL device and context closed.");
 	LOG("Shut down complete. See ya next time! :)");
+}
+
+void CAudioManager::ScheduleDelayedSound(ALuint buffer, const SoundInstanceSettings& opts, float delaySeconds)
+{
+	if (!alIsBuffer(buffer)) return;
+	float clamped = std::min(delaySeconds, 5.0f); // cap at 5 s; beyond that the player won't notice
+	uint32_t playAt = CTimer::m_snTimeInMilliseconds + static_cast<uint32_t>(clamped * 1000.0f);
+	scheduledSounds.push_back({ buffer, opts, playAt });
+	LOG("Scheduled sound in %.0f ms (dist %.1f m)", clamped * 1000.0f, delaySeconds * 343.0f);
+}
+
+void CAudioManager::ProcessScheduledSounds()
+{
+	if (scheduledSounds.empty()) return;
+	uint32_t now = CTimer::m_snTimeInMilliseconds;
+	scheduledSounds.erase(
+		std::remove_if(scheduledSounds.begin(), scheduledSounds.end(),
+			[&](const DelayedSoundEntry& e) -> bool {
+				if (now >= e.playAtTime) {
+					PlaySource(e.buffer, e.opts);
+					return true;
+				}
+				return false;
+			}),
+		scheduledSounds.end());
 }
 
 AudioData CAudioManager::DecodeWAV(const std::string& path)
@@ -605,6 +631,87 @@ std::shared_ptr<SoundInstance> CAudioManager::PlaySource(ALuint buffer, const So
 	return inst;
 }
 
+// types: 0 - normal, 1 - shotgun
+// exported to use in VCParticles
+void CAudioManager::PlayGunshellSound(int type, eSurfaceType surface, const CVector& pos) {
+	std::string surfaceType = "default";
+	switch (surface) {
+	case SURFACE_PED:
+	case SURFACE_GORE: surfaceType = "flesh"; break;
+	case SURFACE_GLASS:
+	case SURFACE_GLASS_WINDOWS_LARGE: surfaceType = "glass"; break;
+	default:
+		if (IsAudioGrass(surface))                                              surfaceType = "grass";
+		else if (IsAudioWood(surface))                                          surfaceType = "wood";
+		else if (IsAudioMetal(surface))                                         surfaceType = "metal";
+		else if (IsAudioSand(surface))                                          surfaceType = "sand";
+		else if (IsAudioGravel(surface))                                        surfaceType = "dirt";
+		else if (IsAudioConcrete(surface))                                      surfaceType = "pavement";
+		else if (IsAudioWater(surface) || IsWater(surface) || IsShallowWater(surface)) surfaceType = "water";
+		else if (IsAudioTile(surface))                                          surfaceType = "tile";
+		break;
+	}
+
+	LOG("Current surface type for gunshell: %s, ID %d", surfaceType.c_str(), surface);
+
+	auto& bufferMap = (type == 1)
+		? g_Buffers.shotgunshellBuffersPerSurface
+		: g_Buffers.gunshellBuffersPerSurface;
+
+	std::vector<ALuint>* selected = nullptr;
+	auto it = bufferMap.find(surfaceType);
+	if (it != bufferMap.end() && !it->second.empty()) {
+		selected = &it->second;
+	}
+	else {
+		auto defIt = bufferMap.find("default");
+		if (defIt != bufferMap.end() && !defIt->second.empty())
+			selected = &defIt->second;
+	}
+
+	if (!selected || selected->empty()) {
+		LOG("No gunshell buffer found for surface: %s, type: %d", surfaceType.c_str(), type);
+		return;
+	}
+
+	ALuint buffer = selected->at(rand() % selected->size());
+
+	SoundInstanceSettings opts;
+	std::optional<float> whatToChoose = std::nullopt;
+	float maxDist = 50.0f;
+	float refDist = 1.0f;
+	float rollOff = 1.0f;
+	float airAbsorption = 0.0f;
+	if (type == 1) {
+		whatToChoose = gPitches.shotgunshell;
+		maxDist = gAttenuationSettings.shotgunshell.maxDist;
+		refDist = gAttenuationSettings.shotgunshell.refDist;
+		rollOff = gAttenuationSettings.shotgunshell.rolloffFactor;
+		airAbsorption = gAttenuationSettings.shotgunshell.airAbsorption;
+	}
+	else {
+		whatToChoose = gPitches.gunshell;
+		maxDist = gAttenuationSettings.gunshell.maxDist;
+		refDist = gAttenuationSettings.gunshell.refDist;
+		rollOff = gAttenuationSettings.gunshell.rolloffFactor;
+		airAbsorption = gAttenuationSettings.gunshell.airAbsorption;
+	}
+	opts.pos = pos;
+	opts.gain = AEAudioHardware.m_fEffectMasterScalingFactor;
+	opts.pitch = Clamp(CTimer::ms_fTimeScale, 0.0f, 1.0f);
+	if (whatToChoose.has_value())
+	{
+		opts.readPitchFromFile = whatToChoose.has_value();
+		opts.readPitch = *whatToChoose;
+	}
+	opts.refDist = refDist;
+	opts.rollOffFactor = rollOff;
+	opts.maxDist = maxDist;
+	opts.airAbsorption = airAbsorption;
+
+	PlaySource(buffer, opts);
+}
+
 // Main weapon sounds handling func
 // TODO: refactor someday, but works fine as is right now
 void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
@@ -650,50 +757,6 @@ void CAudioManager::AudioPlay(fs::path* audiopath, CPhysical* audioentity) {
 		ped = (CPed*)audioentity;
 		weapon = ped->GetWeapon();
 	}
-#if 0
-	std::string section;
-
-	eWeaponType weapInt = weapon ? weapon->m_eWeaponType : WEAPONTYPE_UNARMED;
-
-
-	if (veh) {
-		unsigned short modelIndex = audioentity->m_nModelIndex;
-		eWeaponType weapType = WEAPONTYPE_UNARMED;
-		vehInfo v{};
-		auto it = gvehInfo.find(audioentity);
-		if (it != gvehInfo.end()) {
-			v = it->second;
-			weapType = v.weap;
-			haveVinfo = true;
-		}
-		else {
-			for (const auto& kv : gvehInfo) {
-				if (kv.first && kv.first->m_nModelIndex == modelIndex) {
-					v = kv.second;
-					weapType = v.weap;
-					haveVinfo = true;
-					LOG("gvehInfo found by model match: keyptr=%p model=%d weap=%d", (void*)kv.first, v.model, v.weap);
-					break;
-				}
-			}
-		}
-
-		if (haveVinfo) {
-			if (v.model >= 0) {
-				if (weapType != WEAPONTYPE_UNARMED) {
-					std::string combined = std::format("WEAPONSOUND_{}_{}", v.model, (int)weapType);
-					section = combined;
-				}
-			}
-		}
-	}
-
-
-	if (audioentity && audioentity->m_nType == ENTITY_TYPE_PED) {
-		std::string weapOnly = std::format("WEAPONSOUND_{}", (int)weapInt);
-		section = weapOnly;
-	}
-#endif
 
 	std::string filename;
 	auto p = findEarshotForEntity(audioentity, *audiopath);
