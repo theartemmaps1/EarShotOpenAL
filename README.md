@@ -4,7 +4,7 @@
 
 A revamp of the abandoned **EarShot** mod, originally by HzanRsxa2959. EarShot lets you add **new weapon and world sounds to GTA San Andreas without replacing vanilla sounds.** The sound engine has been rewritten from the deprecated irrKlang library to OpenAL Soft, adding proper 3D spatialization, distance attenuation, doppler, reverb, air absorption, and more.
 
-> **Please read this document in full before asking for support.**
+> **Please read this document in full before asking for support.** Most issues come down to file placement, filename spelling, stereo/mono format, or missing OpenAL files.
 
 ---
 
@@ -668,6 +668,64 @@ Distant gunshot distance = 50.0       ; units — beyond this, distant.wav plays
 Distant explosion distance = 100.0    ; units — beyond this, distant explosion sounds play
 Stereo ambience volume = 0.3          ; volume multiplier for stereo ambience files
 ```
+
+---
+
+## 9. Experimental
+
+Experimental features are playable but may change between builds. Use them for testing packs, and check `EarShotOpenAL.log` if a vehicle sound does not load or stop as expected.
+
+### 9.1 Vehicle SFX
+
+EarShot can replace or extend a small set of vehicle-related sounds by vehicle model ID. These are configured through `GameFolder\EarShot\generic\sirens\sirens.ini`, with the referenced audio files stored in the same `generic\sirens\` folder or a subfolder inside it.
+
+Supported experimental vehicle sound slots:
+
+| INI key | Description | Playback |
+|---|---|---|
+| `siren` | Main emergency siren loop | Loops while the main siren is active |
+| `sirenidle` | Alternate/idle siren loop | Loops while the idle siren state is active |
+| `reverse_beep` | Reverse warning beep | Loops while the vehicle is reversing with the engine on |
+| `air_brakes` | Air-brake release or stop sound | One-shot sound when the vehicle slows or changes movement sharply |
+
+**Example layout:**
+```
+GameFolder\EarShot\generic\sirens\sirens.ini
+GameFolder\EarShot\generic\sirens\police_siren.wav
+GameFolder\EarShot\generic\sirens\police_idle.wav
+GameFolder\EarShot\generic\sirens\truck_reverse.wav
+GameFolder\EarShot\generic\sirens\truck_airbrake.wav
+```
+
+**Example `sirens.ini`:**
+```ini
+; Vehicle model IDs use GTA SA model IDs.
+; 596 = Police LS, 403 = Linerunner.
+
+[VEHICLE_596]
+siren = police_siren.wav
+sirenidle = police_idle.wav
+siren.maxDist = 300.0
+siren.refDist = 8.0
+siren.rolloffFactor = 0.6
+siren.airAbsorption = 1.0
+siren.pitch = 1.0
+sirenidle.pitch = 1.0
+
+[VEHICLE_403]
+reverse_beep = truck_reverse.wav
+air_brakes = truck_airbrake.wav
+reverse_beep.maxDist = 80.0
+reverse_beep.refDist = 4.0
+reverse_beep.rolloffFactor = 1.0
+reverse_beep.airAbsorption = 1.5
+air_brakes.maxDist = 100.0
+air_brakes.refDist = 5.0
+air_brakes.rolloffFactor = 1.0
+air_brakes.airAbsorption = 1.5
+```
+
+Vehicle SFX supports the same audio extensions as the rest of EarShot. You may include the extension in `sirens.ini` or omit it and let EarShot search for a supported format. For positional playback, keep these files mono unless you specifically want a non-positional stereo effect.
 
 ---
 
