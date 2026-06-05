@@ -2,9 +2,11 @@
 
 # EarShot — Revamp by wuzimu7171_ (TheArtemMaps)
 
-A revamp of the abandoned **EarShot** mod, originally by HzanRsxa2959. EarShot lets you add **new weapon and world sounds to GTA San Andreas without replacing vanilla sounds.** The sound engine has been rewritten from the deprecated irrKlang library to OpenAL Soft, adding proper 3D spatialization, distance attenuation, doppler, reverb, air absorption, and more.
+EarShot is a GTA San Andreas audio mod that lets you add **new weapon, vehicle, and world sounds without replacing the vanilla sound banks.** This revamp rebuilds the abandoned original mod by HzanRsxa2959 on top of OpenAL Soft instead of the deprecated irrKlang engine, bringing more flexible 3D playback with spatialization, distance attenuation, doppler, reverb, air absorption, and detailed per-sound tuning.
 
-> **Please read this document in full before asking for support.**
+Use EarShot to build sound packs that sit alongside the original game: custom gunshots and reloads, melee impacts, explosions, footsteps, fire, ambience, bullet whizzes, and a growing set of experimental vehicle effects.
+
+> **Please read this document in full before asking for support.** Most issues come down to file placement, filename spelling, stereo/mono format, or missing OpenAL files.
 
 ---
 
@@ -25,19 +27,19 @@ Join the Discord: https://discord.com/invite/4dxtJCwSx8
 
 ## Important Notes
 
-- **Audio files must be MONO for correct 3D spatialization.** Stereo files will play in 2D space with no distance attenuation. Stereo is only appropriate for sounds that have no position in the world, such as bullet whizz sounds or goggles/camera.
-- Supported audio formats: `.wav`, `.mp3`, `.flac`, `.ogg`
-- For **alternative/randomized sounds**, add a number to the end of the filename: `shoot0.wav`, `shoot1.wav`, etc. Up to **10 alternatives** for most sounds, and **300 for ambience** sounds.
-- **If your sounds are being randomly selected when you don't want that**, check that your filename does not end in a number (e.g. rename `sound1.wav` to `sound.wav`). The mod treats any trailing integer as an alternative index.
-- Enable HRTF in `alsoft.ini` when using headphones. **Disable it when using speakers** — HRTF is designed for headphones only and will sound wrong on speakers.
-- Check `EarShotOpenAL.log` in the mod folder for detailed loading and playback info.
-- The Debug Menu exposes a **Reload all audio folders** command and toggles for logging.
+- **Use mono files for positional 3D sounds.** Mono audio can be placed in the world and attenuated by distance. Stereo audio is treated as 2D frontend audio, so it will not fade by distance or position correctly. Use stereo only for intentionally non-positional sounds such as bullet whizzes, goggles, camera shutter sounds, or stereo ambience.
+- Supported audio formats are `.wav`, `.mp3`, `.flac`, and `.ogg`.
+- For **alternative/randomized sounds**, add a number to the end of the filename: `shoot0.wav`, `shoot1.wav`, etc. Most sound types support up to **10 alternatives**; ambience supports up to **300 alternatives**.
+- If a sound is being randomized unexpectedly, check whether its filename ends in a number. For example, `sound1.wav` is treated as an alternative for `sound.wav`, so rename it to `sound.wav` if you only want one version.
+- Enable HRTF in `alsoft.ini` when using headphones. **Disable HRTF when using speakers**, because it is designed for headphone playback and can make speaker output sound worse.
+- Check `EarShotOpenAL.log` in the mod folder whenever a sound does not load or play. It contains detailed loading and playback information.
+- If you use Debug Menu, EarShot adds a **Reload all audio folders** command and logging toggles, which makes testing sound packs much faster.
 
 ---
 
 ## Installation
 
-Place `EarShot.asi`, `EarShot.ini`, and the `EarShot` folder anywhere the game loads ASI plugins from (root, `scripts\`, or a ModLoader subfolder). `OpenAL32.dll` and `alsoft.ini` **must always be in the game's root folder**.
+Install `EarShot.asi`, `EarShot.ini`, and the `EarShot` folder in any location where your game loads ASI plugins, such as the game root, `scripts\`, or a ModLoader subfolder. Keep `OpenAL32.dll` and `alsoft.ini` in the **game root folder**; EarShot depends on them being there even if the ASI itself is loaded from somewhere else.
 
 **Example layouts:**
 ```
@@ -52,7 +54,7 @@ GameFolder\modloader\EarShotMod\EarShot.asi, EarShot.ini, EarShot\
 
 ## File Structure Overview
 
-All custom sounds live under the `EarShot\` folder (referred to as `GameFolder\EarShot\` below). The layout is:
+All custom sounds live under the `EarShot\` folder, which is referred to as `GameFolder\EarShot\` throughout this README. Weapon-specific sounds usually live in their own weapon folders, while shared world sounds live under `generic\`. A typical setup looks like this:
 
 ```
 EarShot\
@@ -75,15 +77,16 @@ EarShot\
     ambience\
     jacked\
     bullet_whizz\
+    sirens\
 ```
 
 ---
 
 ## 1. Weapon Sounds
 
-Create a folder inside `EarShot\` with any name (e.g. `AK-47`). Inside it, create a file named after the weapon as it appears in `weapon.dat`, with the extension `.earshot` (e.g. `ak47.earshot`). Place your audio files alongside it.
+Create a folder inside `EarShot\` with any name, such as `AK-47`. Inside that folder, add a `.earshot` file named after the weapon as it appears in `weapon.dat` (for example, `ak47.earshot`) and place the matching audio files beside it.
 
-**Tip:** To avoid many folders, you can place multiple `.earshot` files in the same folder and have them all reference the same audio files inside it.
+**Tip:** You do not need one folder per weapon. Multiple `.earshot` files can share the same folder if you want several weapons to reuse the same audio files.
 
 ### Sound Files
 
@@ -205,7 +208,7 @@ airAbsorption = 0.3
 
 ## 1.5 Vehicle-Mounted Projectile Fire
 
-To add a sound for a vehicle firing its projectile weapon (e.g. a helicopter firing rockets), place a file named `projfire.wav` inside the weapon's folder. The mod will play it when that vehicle type fires a projectile.
+To add a sound for a vehicle firing its projectile weapon, such as a helicopter launching rockets, place `projfire.wav` inside the weapon folder. EarShot plays it when that vehicle type fires a projectile weapon.
 
 ---
 
@@ -584,7 +587,7 @@ airAbsorption = 0.8
 
 ## 7. Ambience Sounds
 
-Place files at `GameFolder\EarShot\generic\ambience\`.
+Place ambience files at `GameFolder\EarShot\generic\ambience\`. These sounds are useful for adding life to districts, countryside areas, weather, riots, and distant city activity without editing the game's original audio banks.
 
 | Filename | Description |
 |---|---|
@@ -671,7 +674,65 @@ Stereo ambience volume = 0.3          ; volume multiplier for stereo ambience fi
 
 ---
 
-## 9. Developer Notes
+## 9. Experimental
+
+Experimental features are playable but may change between builds. Use them for testing packs, and check `EarShotOpenAL.log` if a vehicle sound does not load or stop as expected.
+
+### 9.1 Vehicle SFX
+
+EarShot can replace or extend a small set of vehicle-related sounds by vehicle model ID. These are configured through `GameFolder\EarShot\generic\sirens\sirens.ini`, with the referenced audio files stored in the same `generic\sirens\` folder or a subfolder inside it.
+
+Supported experimental vehicle sound slots:
+
+| INI key | Description | Playback |
+|---|---|---|
+| `siren` | Main emergency siren loop | Loops while the main siren is active |
+| `sirenidle` | Alternate/idle siren loop | Loops while the idle siren state is active |
+| `reverse_beep` | Reverse warning beep | Loops while the vehicle is reversing with the engine on |
+| `air_brakes` | Air-brake release or stop sound | One-shot sound when the vehicle slows or changes movement sharply |
+
+**Example layout:**
+```
+GameFolder\EarShot\generic\sirens\sirens.ini
+GameFolder\EarShot\generic\sirens\police_siren.wav
+GameFolder\EarShot\generic\sirens\police_idle.wav
+GameFolder\EarShot\generic\sirens\truck_reverse.wav
+GameFolder\EarShot\generic\sirens\truck_airbrake.wav
+```
+
+**Example `sirens.ini`:**
+```ini
+; Vehicle model IDs use GTA SA model IDs.
+; 596 = Police LS, 403 = Linerunner.
+
+[VEHICLE_596]
+siren = police_siren.wav
+sirenidle = police_idle.wav
+siren.maxDist = 300.0
+siren.refDist = 8.0
+siren.rolloffFactor = 0.6
+siren.airAbsorption = 1.0
+siren.pitch = 1.0
+sirenidle.pitch = 1.0
+
+[VEHICLE_403]
+reverse_beep = truck_reverse.wav
+air_brakes = truck_airbrake.wav
+reverse_beep.maxDist = 80.0
+reverse_beep.refDist = 4.0
+reverse_beep.rolloffFactor = 1.0
+reverse_beep.airAbsorption = 1.5
+air_brakes.maxDist = 100.0
+air_brakes.refDist = 5.0
+air_brakes.rolloffFactor = 1.0
+air_brakes.airAbsorption = 1.5
+```
+
+Vehicle SFX supports the same audio extensions as the rest of EarShot. You may include the extension in `sirens.ini` or omit it and let EarShot search for a supported format. For positional playback, keep these files mono unless you specifically want a non-positional stereo effect.
+
+---
+
+## 10. Developer Notes
 
 If another plugin also uses OpenAL Soft, a context conflict may occur. EarShot exports two functions for sharing its context:
 
