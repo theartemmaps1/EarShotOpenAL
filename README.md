@@ -729,7 +729,41 @@ Vehicle SFX supports the same audio extensions as the rest of EarShot. You may i
 
 ---
 
-## 9. Developer Notes
+### 9.2 Grenade Bouncing
+
+EarShot can play a custom sound each time a grenade (or any throwable) bounces off a surface. The bounce sound is triggered by the projectile's collision events and attenuates in 3D space from the grenade's world position.
+
+Place files at `GameFolder\EarShot\generic\grenade\`.
+
+| Filename          | Description                                                                                    |
+| ----------------- | ---------------------------------------------------------------------------------------------- |
+| `bounce.wav`      | Played on each bounce (supports alternatives: `grenadebounce0.wav`, `grenadebounce1.wav`, … up to 10 total) |
+
+**Example path:**
+
+```
+GameFolder\EarShot\generic\grenadebounce\x\grenadebounce.wav
+```
+List of surfaces to use where "x" is:
+```
+			"default", "metal", "wood", "water", "dirt", "glass", "stone", "sand", "flesh",
+			"pavement", "grass", "tile"
+```
+
+### Attenuation in EarShot.ini
+
+```
+[GRENADE_BOUNCE]
+maxDist = 60.0
+refDist = 1.5
+rolloffFactor = 2.0
+airAbsorption = 1.5
+grenadebounce.pitch = 1.0
+```
+
+---
+
+## 10. Developer Notes
 
 If another plugin also uses OpenAL Soft, a context conflict may occur. EarShot exports two functions for sharing its context:
 
