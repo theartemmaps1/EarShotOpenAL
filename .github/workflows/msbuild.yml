@@ -46,7 +46,7 @@ jobs:
 
       # ── Generate VS solution for EarShot ────────────────────────────────────
       - name: Generate project files
-        run: .\premake5.exe vs2026
+        run: .\premake5.cmd
 
       # ── Build ReleaseSA ──────────────────────────────────────────────────────
       - name: Build EarShot (ReleaseSA)
