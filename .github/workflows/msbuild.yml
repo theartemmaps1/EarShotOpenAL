@@ -52,7 +52,7 @@ jobs:
       - name: Build plugin-sdk (ReleaseSA)
         working-directory: C:\plugin-sdk
         run: |
-          msbuild project_files\plugin-sdk.sln `
+          msbuild plugin.sln `
             /p:Configuration=ReleaseSA `
             /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
@@ -60,7 +60,7 @@ jobs:
       - name: Build plugin-sdk (DebugSA)
         working-directory: C:\plugin-sdk
         run: |
-          msbuild project_files\plugin-sdk.sln `
+          msbuild project_files\plugin.sln `
             /p:Configuration=DebugSA `
             /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
