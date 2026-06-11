@@ -5,7 +5,7 @@ workspace "EarShotOpenAL"
 project "EarShotOpenAL"
 	kind "SharedLib"
 	language "C++"
-	targetdir "$(GTA_SA_DIR)/modloader/EarShotMod/"
+	targetdir "output/asi"
 	objdir ("output/obj")
 	targetextension ".asi"
 	characterset ("MBCS")

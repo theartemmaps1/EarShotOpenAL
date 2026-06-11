@@ -66,11 +66,9 @@ jobs:
 
       - name: Find EarShot.asi
         run: |
-          for /r %%i in (EarShot.asi) do (
-            echo ASI_PATH=%%i>>%GITHUB_ENV%
-            goto found
-          )
-          :found
+            set "ASI_PATH=%GITHUB_WORKSPACE%\output\asi\EarShot.asi"
+            if not exist "%ASI_PATH%" exit /b 1
+            echo ASI_PATH=%ASI_PATH%>>%GITHUB_ENV%
 
       - name: Upload EarShot.asi
         uses: actions/upload-artifact@v4
