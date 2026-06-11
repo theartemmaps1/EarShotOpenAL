@@ -52,18 +52,22 @@ jobs:
       - name: Build plugin-sdk (ReleaseSA)
         working-directory: C:\plugin-sdk
         run: |
-          msbuild plugin.sln `
-            /p:Configuration=ReleaseSA `
-            /p:Platform=Win32 `
-            /m /nologo /verbosity:minimal
+          msbuild plugin.sln ^
+          /p:property:Configuration=Release `
+          /p:property:Platform="Win32" `
+          /p:target:plugin_sa `
+          /p:m `
+          /p:verbosity:minimal
 
       - name: Build plugin-sdk (DebugSA)
         working-directory: C:\plugin-sdk
         run: |
-          msbuild project_files\plugin.sln `
-            /p:Configuration=DebugSA `
-            /p:Platform=Win32 `
-            /m /nologo /verbosity:minimal
+          msbuild plugin.sln ^
+          /p:property:Configuration=zDebug `
+          /p:property:Platform="Win32" `
+          /p:target:plugin_sa `
+          /p:m `
+          /p:verbosity:minimal
 
       # ── Generate EarShot solution ───────────────────────────────────────────
       - name: Generate project files
