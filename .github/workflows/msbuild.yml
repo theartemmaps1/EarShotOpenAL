@@ -11,11 +11,9 @@ on:
 jobs:
   build:
     runs-on: windows-2025
-
     defaults:
       run:
         working-directory: ${{ github.workspace }}
-
     steps:
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout repo
@@ -55,10 +53,15 @@ jobs:
 
       # ── Generate VS solution for EarShot ────────────────────────────────────
       - name: Generate project files
-        run: premake5 vs2026
+        working-directory: ${{ github.workspace }}
+        run: |
+          Write-Host "Working dir: $(Get-Location)"
+          Write-Host "premake5.lua exists: $(Test-Path premake5.lua)"
+          premake5 vs2026
 
       # ── Build ReleaseSA ──────────────────────────────────────────────────────
       - name: Build EarShot (ReleaseSA)
+        working-directory: ${{ github.workspace }}
         run: |
           msbuild project_files\EarShotOpenAL.sln `
             /p:Configuration=ReleaseSA /p:Platform=Win32 `
