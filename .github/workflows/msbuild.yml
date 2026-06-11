@@ -10,33 +10,34 @@ on:
 
 jobs:
   build:
-    runs-on: windows-2022
+    runs-on: windows-2025
 
     steps:
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ── MSVC ────────────────────────────────────────────────────────────────
+      # ── MSVC (x86) ──────────────────────────────────────────────────────────
       - name: Set up MSVC (x86)
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x86
 
+      # ── premake5 beta8 (supports vs2026) ────────────────────────────────────
+      - name: Install premake5
+        uses: Jarod42/install-premake5@v7
+
       # ── plugin-sdk ──────────────────────────────────────────────────────────
       - name: Clone plugin-sdk
         run: git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git C:\plugin-sdk
 
-      - name: Download premake5 for plugin-sdk
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip" `
-            -OutFile "$env:TEMP\premake5.zip"
-          Expand-Archive "$env:TEMP\premake5.zip" -DestinationPath C:\premake5
+      - name: Generate plugin-sdk project files
+        working-directory: C:\plugin-sdk
+        run: premake5 vs2026
 
-      - name: Build plugin-sdk (SA release + debug)
+      - name: Build plugin-sdk (ReleaseSA + DebugSA)
         working-directory: C:\plugin-sdk
         run: |
-          C:\premake5\premake5.exe vs2022
           msbuild project_files\plugin-sdk.sln `
             /p:Configuration=ReleaseSA /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
@@ -50,9 +51,7 @@ jobs:
 
       # ── Generate VS solution for EarShot ────────────────────────────────────
       - name: Generate project files
-        run: |
-          $premake = "${{ github.workspace }}\premake5.exe"
-          & $premake vs2026
+        run: premake5 vs2026
 
       # ── Build ReleaseSA ──────────────────────────────────────────────────────
       - name: Build EarShot (ReleaseSA)
