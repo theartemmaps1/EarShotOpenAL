@@ -37,6 +37,7 @@ project "EarShotOpenAL"
 	defines { "GTASA", "PLUGIN_SGV_10EN", "AL_ALEXT_PROTOTYPES" }
 	includedirs {
 		"$(PLUGIN_SDK_DIR)/plugin_SA/",
+		"$(PLUGIN_SDK_DIR)/plugin_SA/game_sa/enums",
 		"$(PLUGIN_SDK_DIR)/plugin_SA/game_SA/",
 		"$(PLUGIN_SDK_DIR)/plugin_SA/game_SA/rw",
 		"$(PLUGIN_SDK_DIR)/shared/",
