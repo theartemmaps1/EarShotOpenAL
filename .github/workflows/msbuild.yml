@@ -4,8 +4,8 @@ on:
   push:
     branches: [ main ]
     paths-ignore:
-      - 'README.md'
-      - 'LICENSE'
+      - README.md
+      - LICENSE
   workflow_dispatch:
 
 jobs:
@@ -14,6 +14,7 @@ jobs:
 
     defaults:
       run:
+        shell: pwsh
         working-directory: ${{ github.workspace }}
 
     steps:
@@ -35,44 +36,62 @@ jobs:
       - name: Clone plugin-sdk
         run: git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git C:\plugin-sdk
 
-      - name: Generate plugin-sdk project files
-        working-directory: C:\plugin-sdk\tools\generate\Visual Studio.bat
-        run: premake5 vs2026
+      # ── Environment variable expected by premake5.lua ──────────────────────
+      - name: Set PLUGIN_SDK_DIR
+        run: |
+          echo "PLUGIN_SDK_DIR=C:\plugin-sdk" >> $env:GITHUB_ENV
 
-      - name: Build plugin-sdk (ReleaseSA + DebugSA)
+      # ── Generate plugin-sdk solution ────────────────────────────────────────
+      - name: Generate plugin-sdk project files
+        shell: cmd
+        working-directory: C:\plugin-sdk\tools\generate
+        run: |
+          call "Visual Studio.bat"
+
+      # ── Build plugin-sdk ────────────────────────────────────────────────────
+      - name: Build plugin-sdk (ReleaseSA)
         working-directory: C:\plugin-sdk
         run: |
           msbuild project_files\plugin-sdk.sln `
-            /p:Configuration=ReleaseSA /p:Platform=Win32 `
+            /p:Configuration=ReleaseSA `
+            /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
+
+      - name: Build plugin-sdk (DebugSA)
+        working-directory: C:\plugin-sdk
+        run: |
           msbuild project_files\plugin-sdk.sln `
-            /p:Configuration=DebugSA /p:Platform=Win32 `
+            /p:Configuration=DebugSA `
+            /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
 
-      # ── Environment variables expected by premake5.lua ──────────────────────
-      - name: Set PLUGIN_SDK_DIR
-        run: echo "PLUGIN_SDK_DIR=C:\plugin-sdk" >> $env:GITHUB_ENV
-
-      # ── Generate VS solution for EarShot ────────────────────────────────────
+      # ── Generate EarShot solution ───────────────────────────────────────────
       - name: Generate project files
         run: premake5 vs2026
 
-      # ── Build ReleaseSA ──────────────────────────────────────────────────────
+      # ── Build EarShot ───────────────────────────────────────────────────────
       - name: Build EarShot (ReleaseSA)
         run: |
           msbuild project_files\EarShotOpenAL.sln `
-            /p:Configuration=ReleaseSA /p:Platform=Win32 `
+            /p:Configuration=ReleaseSA `
+            /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
 
-      # ── Locate the .asi ─────────────────────────────────────────────────────
+      # ── Locate artifact ─────────────────────────────────────────────────────
       - name: Find EarShot.asi
         run: |
-          $asi = Get-ChildItem -Recurse -Filter "EarShot.asi" | Select-Object -First 1
-          if (-not $asi) { Write-Error "EarShot.asi not found after build"; exit 1 }
-          echo "ASI_PATH=$($asi.FullName)" >> $env:GITHUB_ENV
+          $asi = Get-ChildItem -Path . -Recurse -Filter EarShot.asi |
+            Select-Object -First 1
+
+          if (-not $asi) {
+            Write-Error "EarShot.asi not found after build"
+            exit 1
+          }
+
+          "ASI_PATH=$($asi.FullName)" >> $env:GITHUB_ENV
           Write-Host "Found: $($asi.FullName)"
 
-      # ── Upload artifact ──────────────────────────────────────────────────────
+      # ── Upload artifact ─────────────────────────────────────────────────────
       - name: Upload EarShot.asi
         uses: actions/upload-artifact@v4
         with:
