@@ -10,9 +10,9 @@ project "EarShotOpenAL"
 	targetextension ".asi"
 	characterset ("MBCS")
 	targetname "EarShot"
+	cppdialect "C++latest"
 	toolset "v145"
 	systemversion "latest"
-	cppdialect "C++latest"
 	linkoptions "/SAFESEH:NO"
 	buildoptions { "-std:c++latest", "/permissive"}
 	warnings "Off"
@@ -37,9 +37,9 @@ project "EarShotOpenAL"
 	defines { "GTASA", "PLUGIN_SGV_10EN", "AL_ALEXT_PROTOTYPES" }
 	includedirs {
 		"$(PLUGIN_SDK_DIR)/plugin_SA/",
-		"$(PLUGIN_SDK_DIR)/plugin_SA/game_sa/enums",
 		"$(PLUGIN_SDK_DIR)/plugin_SA/game_SA/",
 		"$(PLUGIN_SDK_DIR)/plugin_SA/game_SA/rw",
+		"$(PLUGIN_SDK_DIR)/plugin_SA/game_SA/enums",
 		"$(PLUGIN_SDK_DIR)/shared/",
 		"$(PLUGIN_SDK_DIR)/shared/game/",
 		"source/vendor/openal-soft/include"

@@ -408,6 +408,7 @@ struct SoundInstanceSettings {
 	bool isPossibleGunFire = false;
 	bool isMinigunBarrelSpin = false;
 	FxSystem_c* fireFX = nullptr;
+	ALuint filter = 0;
 
 	std::optional<fs::path> path;
 	std::optional<std::string> name;
@@ -498,8 +499,10 @@ public:
 	// Initialize reverb...
 	void InitReverb();
 	void InitEcho();
+	void InitEFX();
 	void AttachReverbToSource(ALuint source, bool detach = false/*, bool EAX = false*/);
 	void AttachEchoToSource(ALuint source, bool detach = false/*, bool EAX = false*/);
+	void AttachEffectToSource(ALuint source, ALuint effect, bool detach = false);
 	bool SetSourceGain(ALuint source, float gain);
 	bool SetSourceMaxDist(ALuint source, float maxDist);
 	bool SetSourceRefDist(ALuint source, float ref);

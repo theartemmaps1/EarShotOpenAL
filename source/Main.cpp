@@ -212,7 +212,7 @@ void __fastcall HookedCAEWeaponAudioEntity__WeaponFire(
 		return;
 	}
 
-	float dist = DistanceBetweenPoints(cameraposition, entity->GetPosition());
+	float dist = CVector::Distance(cameraposition, entity->GetPosition());
 	bool farAway = dist >= distanceForDistantGunshot;
 	bool emptyPlayed = false, dryFirePlayed = false;
 	bool alternatePlayed = false;
@@ -521,7 +521,7 @@ void __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 ) {
 	LOG("event %d volume %.2f", Aevent, volume);
 
-	float dist = DistanceBetweenPoints(cameraposition, *posn);
+	float dist = CVector::Distance(cameraposition, *posn);
 	constexpr float SPEED_OF_SOUND = 343.3f;
 	float soundDelay = dist / SPEED_OF_SOUND;
 	float fader = AEAudioHardware.m_fEffectsFaderScalingFactor;
@@ -672,7 +672,13 @@ void __fastcall HookedCAEExplosionAudioEntity_AddAudioEvent(
 				opts.readPitch = *gPitches.distexplosion[lastExplosionType];
 			}
 			opts.pos = *posn;
-			AudioManager.ScheduleDelayedSound(buff, opts, soundDelay);
+			ALuint filter;
+			alGenFilters(1, &filter);
+			alFilteri(filter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
+			alFilterf(filter, AL_LOWPASS_GAIN, 1.2f);
+			alFilterf(filter, AL_LOWPASS_GAINHF, 0.20f); // aggressive HF cut
+			opts.filter = filter;
+			AudioManager.ScheduleDelayedSound(buff, opts, soundDelay);			
 			handled = true;
 		}
 	}
@@ -3174,8 +3180,8 @@ public:
 			// For correct sound panning we use camera's heading, ensuring convincing 3D audio
 			CVector vecCamDir = TheCamera.m_mCameraMatrix.GetForward();
 			CVector vecCamUpDir = TheCamera.m_mCameraMatrix.GetUp();
-			vecCamDir.Normalise();
-			vecCamUpDir.Normalise();
+			vecCamDir.Normalize();
+			vecCamUpDir.Normalize();
 			ALfloat orientation[6] =
 			{
 			vecCamDir.x, vecCamDir.y, vecCamDir.z, // forward vector
@@ -3239,6 +3245,8 @@ public:
 					if (state != AL_PLAYING && state != AL_PAUSED) {
 						//LOG("Removed source '%d'", inst->source);
 						alDeleteSources(1, &inst->source);
+						alDeleteFilters(1, &inst->filter);
+						inst->filter = 0;
 						inst->source = 0;
 						inst.reset();
 						return true;
@@ -3273,7 +3281,7 @@ public:
 				if (veh->m_nStatus == STATUS_SIMPLE)
 					m_fVelocityChange = veh->m_autoPilot.m_fMaxTrafficSpeed * 0.02f;
 				else
-					m_fVelocityChange = DotProduct(veh->m_vecMoveSpeed, veh->GetForward());
+					m_fVelocityChange = CVector::Dot(veh->m_vecMoveSpeed, veh->GetForward());
 				if (veh->bEngineOn && veh->m_fGasPedal < 0.0f)
 				{
 					// play reverse warning beep

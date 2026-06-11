@@ -122,6 +122,12 @@ void CAudioManager::Initialize()
 	Loaders::LoadGrenadeBounceSounds(foldermod);
 }
 
+void CAudioManager::InitEFX() 
+{
+
+}
+
+
 void CAudioManager::Shutdown()
 {
 	// Free OpenAL stuff on shutdown
@@ -563,6 +569,7 @@ std::shared_ptr<SoundInstance> CAudioManager::PlaySource(ALuint buffer, const So
 	auto inst = std::make_shared<SoundInstance>();
 	inst->source = srcHandle.id;
 	inst->buffer = buffer;
+	inst->filter = opts.filter;
 	srcHandle.id = 0;
 
 	ALboolean useLooping = (opts.isFire || opts.isMissile || opts.looping) ? AL_TRUE : AL_FALSE;
@@ -583,6 +590,7 @@ std::shared_ptr<SoundInstance> CAudioManager::PlaySource(ALuint buffer, const So
 	SetSourceRefDist(inst->source, opts.refDist);
 	SetSourceMaxDist(inst->source, opts.maxDist);
 	SetSourceRolloffFactor(inst->source, opts.rollOffFactor);
+	alSourcei(inst->source, AL_DIRECT_FILTER, opts.filter);
 	alSourcePlay(inst->source);
 
 	// fill SoundInstance
