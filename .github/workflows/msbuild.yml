@@ -14,20 +14,33 @@ jobs:
 
     defaults:
       run:
+        shell: pwsh
         working-directory: ${{ github.workspace }}
 
     steps:
-      # ── Checkout ──────────────────────────────────────────────────────────
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ── MSVC (x86) ────────────────────────────────────────────────────────
       - name: Set up MSVC (x86)
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x86
 
-      # ── plugin-sdk ────────────────────────────────────────────────────────
+      - name: Build premake5 from source
+        shell: cmd
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir "C:\Program Files\premake"
+          for /f "delims=" %%i in ('vswhere -find VC\Auxiliary\Build\vcvarsall.bat') do set VCVARS=%%i
+          git clone --depth 1 --branch v5.0.0-beta8 https://github.com/premake/premake-core.git "%TEMP%\premake-build"
+          call "%VCVARS%" x86_amd64
+          cd /d "%TEMP%\premake-build"
+          nmake -f Bootstrap.mak MSDEV=vs2022 windows-msbuild PLATFORM=Win32 CONFIG=release
+          copy bin\release\premake5.exe "C:\Program Files\premake\premake5.exe"
+
+      - name: Add premake5 to PATH
+        run: echo "C:\Program Files\premake" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Clone plugin-sdk
         run: git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git C:\plugin-sdk
 
@@ -35,40 +48,40 @@ jobs:
         shell: pwsh
         run: |
           Set-Location "C:\plugin-sdk"
-          & "${{ github.workspace }}\premake5.exe" --file="C:\plugin-sdk\premake5.lua" vs2022
+          Write-Host "CWD: $(Get-Location)"
+          Write-Host "premake5.lua exists: $(Test-Path premake5.lua)"
+          if (-not (Test-Path premake5.lua)) { Get-ChildItem; exit 1 }
+          premake5 vs2026
 
-      - name: Build plugin-sdk (ReleaseSA + DebugSA)
-        working-directory: C:\plugin-sdk
+      - name: Build plugin-sdk (ReleaseSA)
         run: |
-          msbuild project_files\plugin-sdk.sln `
+          msbuild "C:\plugin-sdk\project_files\plugin-sdk.sln" `
             /p:Configuration=ReleaseSA /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
-          msbuild project_files\plugin-sdk.sln `
+
+      - name: Build plugin-sdk (DebugSA)
+        run: |
+          msbuild "C:\plugin-sdk\project_files\plugin-sdk.sln" `
             /p:Configuration=DebugSA /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
 
-      # ── Environment variables expected by premake5.lua ────────────────────
       - name: Set PLUGIN_SDK_DIR
         run: echo "PLUGIN_SDK_DIR=C:\plugin-sdk" >> $env:GITHUB_ENV
 
-      # ── Generate VS solution for EarShot ──────────────────────────────────
       - name: Generate project files
-        shell: pwsh
         run: |
           Set-Location "${{ github.workspace }}"
           Write-Host "CWD: $(Get-Location)"
-          Write-Host "premake5.lua exists: $(Test-Path '${{ github.workspace }}\premake5.lua')"
-          & "${{ github.workspace }}\premake5.exe" --file="${{ github.workspace }}\premake5.lua" vs2022
+          Write-Host "premake5.lua exists: $(Test-Path premake5.lua)"
+          if (-not (Test-Path premake5.lua)) { Get-ChildItem; exit 1 }
+          premake5 vs2026
 
-      # ── Build ReleaseSA ───────────────────────────────────────────────────
       - name: Build EarShot (ReleaseSA)
-        working-directory: ${{ github.workspace }}
         run: |
-          msbuild project_files\EarShotOpenAL.sln `
+          msbuild "${{ github.workspace }}\project_files\EarShotOpenAL.sln" `
             /p:Configuration=ReleaseSA /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
 
-      # ── Locate the .asi ───────────────────────────────────────────────────
       - name: Find EarShot.asi
         run: |
           $asi = Get-ChildItem -Recurse -Filter "EarShot.asi" | Select-Object -First 1
@@ -76,7 +89,6 @@ jobs:
           echo "ASI_PATH=$($asi.FullName)" >> $env:GITHUB_ENV
           Write-Host "Found: $($asi.FullName)"
 
-      # ── Upload artifact ───────────────────────────────────────────────────
       - name: Upload EarShot.asi
         uses: actions/upload-artifact@v4
         with:
