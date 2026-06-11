@@ -10,82 +10,50 @@ on:
 
 jobs:
   build:
-    runs-on: windows-2025
-
-    defaults:
-      run:
-        shell: pwsh
-        working-directory: ${{ github.workspace }}
+    runs-on: windows-2022
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up MSVC (x86)
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x86
-
-      - name: Build premake5 from source
-        shell: cmd
-        working-directory: ${{ github.workspace }}
-        run: |
-          mkdir "C:\Program Files\premake"
-          for /f "delims=" %%i in ('vswhere -find VC\Auxiliary\Build\vcvarsall.bat') do set VCVARS=%%i
-          git clone --depth 1 --branch v5.0.0-beta8 https://github.com/premake/premake-core.git "%TEMP%\premake-build"
-          call "%VCVARS%" x86_amd64
-          cd /d "%TEMP%\premake-build"
-          nmake -f Bootstrap.mak MSDEV=vs2022 windows-msbuild PLATFORM=Win32 CONFIG=release
-          copy bin\release\premake5.exe "C:\Program Files\premake\premake5.exe"
-
-      - name: Add premake5 to PATH
-        run: echo "C:\Program Files\premake" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Setup msbuild
+        uses: microsoft/setup-msbuild@v3
 
       - name: Clone plugin-sdk
         run: git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git C:\plugin-sdk
 
       - name: Generate plugin-sdk project files
-        shell: pwsh
+        shell: cmd
         run: |
-          Set-Location "C:\plugin-sdk"
-          Write-Host "CWD: $(Get-Location)"
-          Write-Host "premake5.lua exists: $(Test-Path premake5.lua)"
-          if (-not (Test-Path premake5.lua)) { Get-ChildItem; exit 1 }
-          premake5 vs2026
+          set PLUGIN_SDK_DIR=C:\plugin-sdk
+          "C:\plugin-sdk\tools\generate\Visual Studio.bat"
 
-      - name: Build plugin-sdk (ReleaseSA)
+      - name: Build plugin-sdk (ReleaseSA + DebugSA)
+        shell: cmd
         run: |
-          msbuild "C:\plugin-sdk\project_files\plugin-sdk.sln" `
-            /p:Configuration=ReleaseSA /p:Platform=Win32 `
-            /m /nologo /verbosity:minimal
+          set PLUGIN_SDK_DIR=C:\plugin-sdk
+          msbuild C:\plugin-sdk\plugin.sln /property:Configuration=ReleaseSA /property:Platform=Win32 /m /nologo /verbosity:minimal
+          msbuild C:\plugin-sdk\plugin.sln /property:Configuration=DebugSA /property:Platform=Win32 /m /nologo /verbosity:minimal
 
-      - name: Build plugin-sdk (DebugSA)
+      - name: Generate EarShot project files
+        shell: cmd
+        working-directory: ${{ github.workspace }}
         run: |
-          msbuild "C:\plugin-sdk\project_files\plugin-sdk.sln" `
-            /p:Configuration=DebugSA /p:Platform=Win32 `
-            /m /nologo /verbosity:minimal
-
-      - name: Set PLUGIN_SDK_DIR
-        run: echo "PLUGIN_SDK_DIR=C:\plugin-sdk" >> $env:GITHUB_ENV
-
-      - name: Generate project files
-        run: |
-          Set-Location "${{ github.workspace }}"
-          Write-Host "CWD: $(Get-Location)"
-          Write-Host "premake5.lua exists: $(Test-Path premake5.lua)"
-          if (-not (Test-Path premake5.lua)) { Get-ChildItem; exit 1 }
-          premake5 vs2026
+          set PLUGIN_SDK_DIR=C:\plugin-sdk
+          "C:\plugin-sdk\tools\generate\Visual Studio.bat"
 
       - name: Build EarShot (ReleaseSA)
+        shell: cmd
+        working-directory: ${{ github.workspace }}
         run: |
-          msbuild "${{ github.workspace }}\project_files\EarShotOpenAL.sln" `
-            /p:Configuration=ReleaseSA /p:Platform=Win32 `
-            /m /nologo /verbosity:minimal
+          set PLUGIN_SDK_DIR=C:\plugin-sdk
+          msbuild project_files\EarShotOpenAL.sln /property:Configuration=ReleaseSA /property:Platform=Win32 /m /nologo /verbosity:minimal
 
-      - name: Find EarShot.asi
+      - name: Find and upload EarShot.asi
+        shell: pwsh
         run: |
           $asi = Get-ChildItem -Recurse -Filter "EarShot.asi" | Select-Object -First 1
-          if (-not $asi) { Write-Error "EarShot.asi not found after build"; exit 1 }
+          if (-not $asi) { Write-Error "EarShot.asi not found"; exit 1 }
           echo "ASI_PATH=$($asi.FullName)" >> $env:GITHUB_ENV
           Write-Host "Found: $($asi.FullName)"
 
