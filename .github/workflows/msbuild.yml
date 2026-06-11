@@ -1,0 +1,76 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ── MSVC ────────────────────────────────────────────────────────────────
+      - name: Set up MSVC (x86)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+
+      # ── plugin-sdk ──────────────────────────────────────────────────────────
+      - name: Clone plugin-sdk
+        run: |
+          git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git C:\plugin-sdk
+
+      - name: Build plugin-sdk (SA release + debug)
+        working-directory: C:\plugin-sdk
+        run: |
+          # Generate the VS solution with premake
+          .\premake5.exe vs2022
+          # Build the two configs the mod links against
+          msbuild project_files\plugin-sdk.sln `
+            /p:Configuration=ReleaseSA /p:Platform=Win32 `
+            /m /nologo /verbosity:minimal
+          msbuild project_files\plugin-sdk.sln `
+            /p:Configuration=DebugSA   /p:Platform=Win32 `
+            /m /nologo /verbosity:minimal
+
+      # ── Environment variables expected by premake5.lua ───────────────────────
+      - name: Set PLUGIN_SDK_DIR
+        run: echo "PLUGIN_SDK_DIR=C:\plugin-sdk" >> $env:GITHUB_ENV
+
+      # ── Generate VS solution for EarShot ────────────────────────────────────
+      - name: Generate project files
+        run: .\premake5.exe vs2026
+
+      # ── Build ReleaseSA ──────────────────────────────────────────────────────
+      - name: Build EarShot (ReleaseSA)
+        run: |
+          msbuild project_files\EarShotOpenAL.sln `
+            /p:Configuration=ReleaseSA /p:Platform=Win32 `
+            /m /nologo /verbosity:minimal
+
+      # ── Locate the .asi ─────────────────────────────────────────────────────
+      # premake5.lua sets targetdir to $(GTA_SA_DIR)/modloader/EarShotMod/
+      # which won't exist in CI, so the linker writes the .asi into the
+      # project_files\ output tree instead.  We grab it wherever it landed.
+      - name: Find EarShot.asi
+        id: find_asi
+        run: |
+          $asi = Get-ChildItem -Recurse -Filter "EarShot.asi" | Select-Object -First 1
+          if (-not $asi) { Write-Error "EarShot.asi not found after build"; exit 1 }
+          echo "ASI_PATH=$($asi.FullName)" >> $env:GITHUB_ENV
+          echo "Found: $($asi.FullName)"
+
+      # ── Upload artifact ──────────────────────────────────────────────────────
+      - name: Upload EarShot.asi
+        uses: actions/upload-artifact@v4
+        with:
+          name: EarShot-${{ github.sha }}
+          path: ${{ env.ASI_PATH }}
+          if-no-files-found: error
