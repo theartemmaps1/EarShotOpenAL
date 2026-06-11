@@ -10,6 +10,8 @@ project "EarShotOpenAL"
 	targetextension ".asi"
 	characterset ("MBCS")
 	targetname "EarShot"
+	toolset "v145"
+	systemversion "latest"
 	cppdialect "C++latest"
 	linkoptions "/SAFESEH:NO"
 	buildoptions { "-std:c++latest", "/permissive"}
