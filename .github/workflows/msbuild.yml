@@ -11,25 +11,34 @@ on:
 jobs:
   build:
     runs-on: windows-2025
+
     defaults:
       run:
         working-directory: ${{ github.workspace }}
+
     steps:
-      # ── Checkout ────────────────────────────────────────────────────────────
+      # ── Checkout ──────────────────────────────────────────────────────────
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ── MSVC (x86) ──────────────────────────────────────────────────────────
+      # ── MSVC (x86) ────────────────────────────────────────────────────────
       - name: Set up MSVC (x86)
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x86
 
       # ── premake5 beta8 (supports vs2026) ────────────────────────────────────
-      - name: Install premake5
-        uses: Jarod42/install-premake5@v7
+      - name: Build premake5 from source
+        shell: pwsh
+        run: |
+          mkdir "C:\Program Files\premake"
+          $vcvarall_path = vswhere -find VC\Auxiliary\Build\vcvarsall.bat
+          git clone --depth 1 --branch v5.0.0-beta8 https://github.com/premake/premake-core.git .premake-build
+          cmd.exe /c "call ""$vcvarall_path"" x86_amd64 && cd .premake-build && nmake -f Bootstrap.mak MSDEV=vs2022 windows-msbuild PLATFORM=Win32 CONFIG=release && cp bin/release/premake5.exe ""c:/Program Files/premake"""
+          Remove-Item .premake-build -Recurse -Force
+          echo "C:\Program Files\premake" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # ── plugin-sdk ──────────────────────────────────────────────────────────
+      # ── plugin-sdk ────────────────────────────────────────────────────────
       - name: Clone plugin-sdk
         run: git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git C:\plugin-sdk
 
