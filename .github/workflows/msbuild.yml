@@ -33,9 +33,9 @@ jobs:
 
       - name: Generate plugin-sdk project files
         shell: pwsh
-        working-directory: C:\plugin-sdk
         run: |
-          & "${{ github.workspace }}\premake5.exe" vs2022
+          Set-Location "C:\plugin-sdk"
+          & "${{ github.workspace }}\premake5.exe" --file="C:\plugin-sdk\premake5.lua" vs2022
 
       - name: Build plugin-sdk (ReleaseSA + DebugSA)
         working-directory: C:\plugin-sdk
@@ -54,12 +54,11 @@ jobs:
       # ── Generate VS solution for EarShot ──────────────────────────────────
       - name: Generate project files
         shell: pwsh
-        working-directory: ${{ github.workspace }}
         run: |
-          Write-Host "Working dir: $(Get-Location)"
-          Write-Host "premake5.exe exists: $(Test-Path premake5.exe)"
-          Write-Host "premake5.lua exists: $(Test-Path premake5.lua)"
-          & ".\premake5.exe" vs2022
+          Set-Location "${{ github.workspace }}"
+          Write-Host "CWD: $(Get-Location)"
+          Write-Host "premake5.lua exists: $(Test-Path '${{ github.workspace }}\premake5.lua')"
+          & "${{ github.workspace }}\premake5.exe" --file="${{ github.workspace }}\premake5.lua" vs2022
 
       # ── Build ReleaseSA ───────────────────────────────────────────────────
       - name: Build EarShot (ReleaseSA)
