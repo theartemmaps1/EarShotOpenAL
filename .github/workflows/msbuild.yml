@@ -12,6 +12,10 @@ jobs:
   build:
     runs-on: windows-2025
 
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+
     steps:
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout repo
