@@ -48,7 +48,7 @@ jobs:
         run: |
           msbuild plugin.sln ^
             /p:Configuration=Release ^
-            /p:Platform="Win32" ^
+            /p:Platform="Mixed Platforms" ^
             /target:plugin_sa ^
             /m ^
             /verbosity:minimal
