@@ -6,10 +6,11 @@ on:
     paths-ignore:
       - 'README.md'
       - 'LICENSE'
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       # ── Checkout ────────────────────────────────────────────────────────────
@@ -24,29 +25,34 @@ jobs:
 
       # ── plugin-sdk ──────────────────────────────────────────────────────────
       - name: Clone plugin-sdk
+        run: git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git C:\plugin-sdk
+
+      - name: Download premake5 for plugin-sdk
         run: |
-          git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git C:\plugin-sdk
+          Invoke-WebRequest -Uri "https://github.com/premake/premake-core/releases/download/v5.0.0-beta2/premake-5.0.0-beta2-windows.zip" `
+            -OutFile "$env:TEMP\premake5.zip"
+          Expand-Archive "$env:TEMP\premake5.zip" -DestinationPath C:\premake5
 
       - name: Build plugin-sdk (SA release + debug)
         working-directory: C:\plugin-sdk
         run: |
-          # Generate the VS solution with premake
-          .\premake5.exe vs2022
-          # Build the two configs the mod links against
+          C:\premake5\premake5.exe vs2022
           msbuild project_files\plugin-sdk.sln `
             /p:Configuration=ReleaseSA /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
           msbuild project_files\plugin-sdk.sln `
-            /p:Configuration=DebugSA   /p:Platform=Win32 `
+            /p:Configuration=DebugSA /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
 
-      # ── Environment variables expected by premake5.lua ───────────────────────
+      # ── Environment variables expected by premake5.lua ──────────────────────
       - name: Set PLUGIN_SDK_DIR
         run: echo "PLUGIN_SDK_DIR=C:\plugin-sdk" >> $env:GITHUB_ENV
 
       # ── Generate VS solution for EarShot ────────────────────────────────────
       - name: Generate project files
-        run: .\premake5.cmd
+        run: |
+          $premake = "${{ github.workspace }}\premake5.exe"
+          & $premake vs2026
 
       # ── Build ReleaseSA ──────────────────────────────────────────────────────
       - name: Build EarShot (ReleaseSA)
@@ -56,16 +62,12 @@ jobs:
             /m /nologo /verbosity:minimal
 
       # ── Locate the .asi ─────────────────────────────────────────────────────
-      # premake5.lua sets targetdir to $(GTA_SA_DIR)/modloader/EarShotMod/
-      # which won't exist in CI, so the linker writes the .asi into the
-      # project_files\ output tree instead.  We grab it wherever it landed.
       - name: Find EarShot.asi
-        id: find_asi
         run: |
           $asi = Get-ChildItem -Recurse -Filter "EarShot.asi" | Select-Object -First 1
           if (-not $asi) { Write-Error "EarShot.asi not found after build"; exit 1 }
           echo "ASI_PATH=$($asi.FullName)" >> $env:GITHUB_ENV
-          echo "Found: $($asi.FullName)"
+          Write-Host "Found: $($asi.FullName)"
 
       # ── Upload artifact ──────────────────────────────────────────────────────
       - name: Upload EarShot.asi
