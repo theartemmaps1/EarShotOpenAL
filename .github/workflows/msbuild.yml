@@ -27,24 +27,15 @@ jobs:
         with:
           arch: x86
 
-      # ── premake5 beta8 (supports vs2026) ────────────────────────────────────
-      - name: Build premake5 from source
-        shell: pwsh
-        run: |
-          mkdir "C:\Program Files\premake"
-          $vcvarall_path = vswhere -find VC\Auxiliary\Build\vcvarsall.bat
-          git clone --depth 1 --branch v5.0.0-beta8 https://github.com/premake/premake-core.git .premake-build
-          cmd.exe /c "call ""$vcvarall_path"" x86_amd64 && cd .premake-build && nmake -f Bootstrap.mak MSDEV=vs2022 windows-msbuild PLATFORM=Win32 CONFIG=release && cp bin/release/premake5.exe ""c:/Program Files/premake"""
-          Remove-Item .premake-build -Recurse -Force
-          echo "C:\Program Files\premake" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
       # ── plugin-sdk ────────────────────────────────────────────────────────
       - name: Clone plugin-sdk
         run: git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git C:\plugin-sdk
 
       - name: Generate plugin-sdk project files
+        shell: pwsh
         working-directory: C:\plugin-sdk
-        run: premake5 vs2026
+        run: |
+          & "${{ github.workspace }}\premake5.exe" vs2022
 
       - name: Build plugin-sdk (ReleaseSA + DebugSA)
         working-directory: C:\plugin-sdk
@@ -56,19 +47,21 @@ jobs:
             /p:Configuration=DebugSA /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
 
-      # ── Environment variables expected by premake5.lua ──────────────────────
+      # ── Environment variables expected by premake5.lua ────────────────────
       - name: Set PLUGIN_SDK_DIR
         run: echo "PLUGIN_SDK_DIR=C:\plugin-sdk" >> $env:GITHUB_ENV
 
-      # ── Generate VS solution for EarShot ────────────────────────────────────
+      # ── Generate VS solution for EarShot ──────────────────────────────────
       - name: Generate project files
+        shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
           Write-Host "Working dir: $(Get-Location)"
+          Write-Host "premake5.exe exists: $(Test-Path premake5.exe)"
           Write-Host "premake5.lua exists: $(Test-Path premake5.lua)"
-          premake5 vs2026
+          & ".\premake5.exe" vs2022
 
-      # ── Build ReleaseSA ──────────────────────────────────────────────────────
+      # ── Build ReleaseSA ───────────────────────────────────────────────────
       - name: Build EarShot (ReleaseSA)
         working-directory: ${{ github.workspace }}
         run: |
@@ -76,7 +69,7 @@ jobs:
             /p:Configuration=ReleaseSA /p:Platform=Win32 `
             /m /nologo /verbosity:minimal
 
-      # ── Locate the .asi ─────────────────────────────────────────────────────
+      # ── Locate the .asi ───────────────────────────────────────────────────
       - name: Find EarShot.asi
         run: |
           $asi = Get-ChildItem -Recurse -Filter "EarShot.asi" | Select-Object -First 1
@@ -84,7 +77,7 @@ jobs:
           echo "ASI_PATH=$($asi.FullName)" >> $env:GITHUB_ENV
           Write-Host "Found: $($asi.FullName)"
 
-      # ── Upload artifact ──────────────────────────────────────────────────────
+      # ── Upload artifact ───────────────────────────────────────────────────
       - name: Upload EarShot.asi
         uses: actions/upload-artifact@v4
         with:
