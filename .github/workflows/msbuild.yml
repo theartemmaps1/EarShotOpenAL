@@ -58,7 +58,7 @@ jobs:
 
       - name: Build EarShot (ReleaseSA)
         run: |
-          msbuild project_files\EarShotOpenAL.sln ^
+          msbuild project_files\EarShotOpenAL.slnx ^
             /p:Configuration=ReleaseSA ^
             /p:Platform=Win32 ^
             /m ^
