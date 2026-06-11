@@ -18,36 +18,33 @@ jobs:
         working-directory: ${{ github.workspace }}
 
     steps:
-      # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ── MSVC ────────────────────────────────────────────────────────────────
       - name: Set up MSVC (x86)
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x86
 
-      # ── premake ────────────────────────────────────────────────────────────
+      - name: Setup msbuild
+        uses: microsoft/setup-msbuild@v3
+
       - name: Install premake5
         uses: Jarod42/install-premake5@v7
 
-      # ── plugin-sdk ──────────────────────────────────────────────────────────
       - name: Clone plugin-sdk
-        run: git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git C:\plugin-sdk
+        run: git clone --depth 1 https://github.com/DK22Pac/plugin-sdk.git "%GITHUB_WORKSPACE%\plugin-sdk"
 
       - name: Set PLUGIN_SDK_DIR
-        run: echo PLUGIN_SDK_DIR=C:\plugin-sdk >> %GITHUB_ENV%
+        run: echo PLUGIN_SDK_DIR=%GITHUB_WORKSPACE%\plugin-sdk>>%GITHUB_ENV%
 
-      # ── Generate plugin-sdk solution ────────────────────────────────────────
       - name: Generate plugin-sdk project files
-        working-directory: C:\plugin-sdk\tools\generate
+        working-directory: ${{ github.workspace }}\plugin-sdk
         run: |
-          call "Visual Studio.bat"
+          call "tools\generate\Visual Studio.bat"
 
-      # ── Build plugin-sdk (official configuration) ───────────────────────────
       - name: Build plugin-sdk
-        working-directory: C:\plugin-sdk
+        working-directory: ${{ github.workspace }}\plugin-sdk
         run: |
           msbuild plugin.sln ^
             /p:Configuration=Release ^
@@ -56,11 +53,9 @@ jobs:
             /m ^
             /verbosity:minimal
 
-      # ── Generate your project ───────────────────────────────────────────────
-      - name: Generate EarShot project files
+      - name: Generate project files
         run: premake5 vs2026
 
-      # ── Build EarShot ───────────────────────────────────────────────────────
       - name: Build EarShot (ReleaseSA)
         run: |
           msbuild project_files\EarShotOpenAL.sln ^
@@ -69,16 +64,14 @@ jobs:
             /m ^
             /verbosity:minimal
 
-      # ── Find output ─────────────────────────────────────────────────────────
       - name: Find EarShot.asi
         run: |
           for /r %%i in (EarShot.asi) do (
-            echo ASI_PATH=%%i>> %GITHUB_ENV%
-            goto done
+            echo ASI_PATH=%%i>>%GITHUB_ENV%
+            goto found
           )
-          :done
+          :found
 
-      # ── Upload artifact ─────────────────────────────────────────────────────
       - name: Upload EarShot.asi
         uses: actions/upload-artifact@v4
         with:
