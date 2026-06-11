@@ -49,6 +49,7 @@ jobs:
           msbuild plugin.sln ^
             /p:Configuration=Release ^
             /p:Platform="Mixed Platforms" ^
+            /p:PlatformToolset=v145 ^
             /target:plugin_sa ^
             /m ^
             /verbosity:minimal
@@ -61,6 +62,7 @@ jobs:
           msbuild project_files\EarShotOpenAL.slnx ^
             /p:Configuration=ReleaseSA ^
             /p:Platform=Win32 ^
+            /p:PlatformToolset=v145 ^
             /m ^
             /verbosity:minimal
 
